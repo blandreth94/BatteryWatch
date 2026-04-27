@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/schema'
 import type { AppSettings } from '../types'
@@ -19,7 +20,9 @@ function applyEnvOverrides(stored: AppSettings): AppSettings {
 
 export function useSettings(): AppSettings {
   const stored = useLiveQuery(() => db.settings.get('settings'), [])
-  return applyEnvOverrides(stored ?? DEFAULT_SETTINGS)
+  // Memoize so the returned object only gets a new reference when `stored`
+  // actually changes — prevents Settings form from resetting on every render.
+  return useMemo(() => applyEnvOverrides(stored ?? DEFAULT_SETTINGS), [stored])
 }
 
 export async function saveSettings(partial: Partial<AppSettings>): Promise<void> {
