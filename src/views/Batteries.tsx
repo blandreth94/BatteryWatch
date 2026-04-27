@@ -4,6 +4,7 @@ import { useBatteries, addBattery, updateBattery, deleteBattery } from '../store
 import { useAllActiveChargerSessions } from '../store/useChargerSlots'
 import { useActiveHeaterSessions } from '../store/useHeaterSlots'
 import { useSettings } from '../store/useSettings'
+import { useActiveUsageEvents } from '../store/useUsageEvents'
 import { db } from '../db/schema'
 import Modal from '../components/Modal'
 import type { Battery, ChargerSession, HeaterSession, BatteryUsageEvent } from '../types'
@@ -25,11 +26,14 @@ function locationLabel(
   battery: Battery,
   chargerSessions: ChargerSession[],
   heaterSessions: HeaterSession[],
+  activeUsageEvents: BatteryUsageEvent[],
 ): string {
   const charger = chargerSessions.find((s) => s.batteryId === battery.id)
   if (charger) return `Charger slot ${charger.slotNumber}`
   const heater = heaterSessions.find((s) => s.batteryId === battery.id)
   if (heater) return `Heater ${heater.slotNumber}`
+  const usage = activeUsageEvents.find((e) => e.batteryId === battery.id)
+  if (usage) return usage.eventType === 'match' ? `Out · Match ${usage.matchNumber ?? '?'}` : 'Out · Practice'
   return 'Pit'
 }
 
@@ -256,6 +260,7 @@ export default function Batteries() {
   const batteries = useBatteries()
   const activeChargerSessions = useAllActiveChargerSessions()
   const activeHeaterSessions = useActiveHeaterSessions()
+  const activeUsageEvents = useActiveUsageEvents()
   const settings = useSettings()
   const [selected, setSelected] = useState<Battery | null>(null)
   const [showAdd, setShowAdd] = useState(false)
@@ -274,7 +279,7 @@ export default function Batteries() {
       )}
 
       {batteries.map((battery) => {
-        const loc = locationLabel(battery, activeChargerSessions, activeHeaterSessions)
+        const loc = locationLabel(battery, activeChargerSessions, activeHeaterSessions, activeUsageEvents)
         return (
           <div key={battery.id} className="battery-row" onClick={() => setSelected(battery)}>
             <div className="battery-row__id">{battery.id}</div>
