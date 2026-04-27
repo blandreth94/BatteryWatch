@@ -38,6 +38,7 @@ export default function Settings() {
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importStatus, setImportStatus] = useState('')
   const [confirmClear, setConfirmClear] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'upToDate'>('idle')
 
   useEffect(() => { setForm(settings) }, [settings])
 
@@ -103,6 +104,20 @@ export default function Settings() {
     } catch {
       setImportStatus('❌ Import failed — invalid file')
     }
+  }
+
+  async function handleCheckUpdate() {
+    setUpdateStatus('checking')
+    try {
+      const reg = await navigator.serviceWorker.getRegistration()
+      if (reg) {
+        await reg.update()
+        // If a new SW was found, skipWaiting + clientsClaim will reload the page automatically.
+        // If we're still here after update(), there was nothing new.
+      }
+    } catch { /* SW not supported or blocked */ }
+    setUpdateStatus('upToDate')
+    setTimeout(() => setUpdateStatus('idle'), 3000)
   }
 
   async function handleClear() {
@@ -200,6 +215,13 @@ export default function Settings() {
       <button className="btn-primary" style={{ width: '100%', padding: '0.75rem' }} onClick={handleSave}>
         {saved ? '✅ Saved' : 'Save settings'}
       </button>
+
+      <div className="card">
+        <h2 style={{ marginBottom: '1rem' }}>App</h2>
+        <button className="btn-ghost" style={{ width: '100%' }} onClick={handleCheckUpdate} disabled={updateStatus === 'checking'}>
+          {updateStatus === 'checking' ? 'Checking…' : updateStatus === 'upToDate' ? '✅ Already up to date' : 'Check for updates'}
+        </button>
+      </div>
 
       <div className="card">
         <h2 style={{ marginBottom: '1rem' }}>Data</h2>
