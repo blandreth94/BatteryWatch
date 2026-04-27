@@ -56,10 +56,13 @@ export default function Settings() {
   async function handleSave() {
     // Never overwrite fields that are controlled by env vars
     const patch: Partial<AppSettings> = { ...form }
-    if (envLocked.tbaApiKey) delete patch.tbaApiKey
+    if (envLocked.tbaApiKey)   delete patch.tbaApiKey
     if (envLocked.tbaEventKey) delete patch.tbaEventKey
-    if (envLocked.eventName) delete patch.eventName
-    if (envLocked.teamNumber) delete patch.teamNumber
+    if (envLocked.eventName)   delete patch.eventName
+    if (envLocked.teamNumber)  delete patch.teamNumber
+    // Strip fields removed from AppSettings that may linger in old stored objects
+    delete (patch as Record<string, unknown>).resistanceWarningThreshold
+    delete (patch as Record<string, unknown>).overchargeWarningHours
     await saveSettings(patch)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
@@ -159,16 +162,6 @@ export default function Settings() {
           <div className="form-group">
             <label>Walk + queue time (min)</label>
             <input type="number" min={1} max={120} {...field('walkAndQueueMinutes')} />
-          </div>
-        </div>
-        <div className="form-row">
-          <div className="form-group">
-            <label>Resistance warning (mΩ)</label>
-            <input type="number" min={50} {...field('resistanceWarningThreshold')} />
-          </div>
-          <div className="form-group">
-            <label>Overcharge warning (h)</label>
-            <input type="number" min={1} max={24} {...field('overchargeWarningHours')} />
           </div>
         </div>
       </div>

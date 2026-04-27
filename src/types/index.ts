@@ -55,14 +55,12 @@ export interface MatchRecord {
 }
 
 export interface AppSettings {
-  key: string;                        // always "settings"
+  key: string;                   // always "settings"
   eventName: string;
   teamNumber: number;
   seasonYear: number;
-  heaterWarmMinutes: number;          // default 18
-  walkAndQueueMinutes: number;        // lead time, default 20
-  resistanceWarningThreshold: number; // milliohms, default 150 (kept for recording, not shown)
-  overchargeWarningHours: number;     // default 4
+  heaterWarmMinutes: number;     // default 30
+  walkAndQueueMinutes: number;   // lead time, default 20
   tbaApiKey: string;
   tbaEventKey: string;
 }
@@ -72,10 +70,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   eventName: '',
   teamNumber: 401,
   seasonYear: new Date().getFullYear(),
-  heaterWarmMinutes: 18,
+  heaterWarmMinutes: 30,
   walkAndQueueMinutes: 20,
-  resistanceWarningThreshold: 150,
-  overchargeWarningHours: 4,
   tbaApiKey: '',
   tbaEventKey: '',
 }

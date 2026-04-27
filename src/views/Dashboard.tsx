@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useSuggestions } from '../store/useSuggestions'
 import { useActiveHeaterSessions, placeOnHeater, removeFromHeater } from '../store/useHeaterSlots'
-import { useAllActiveChargerSessions } from '../store/useChargerSlots'
 import { useSettings } from '../store/useSettings'
 import { useUpcomingMatches, assignBatteryToMatch, startMatch } from '../store/useMatchSchedule'
 import { recordUsageEvent } from '../store/useUsageEvents'
@@ -249,7 +248,6 @@ export default function Dashboard() {
 
   const { heaterSuggestions, matchSuggestions } = useSuggestions()
   const activeHeaterSessions = useActiveHeaterSessions()
-  const activeChargerSessions = useAllActiveChargerSessions()
   const settings = useSettings()
   const upcomingMatches = useUpcomingMatches()
 
@@ -260,21 +258,8 @@ export default function Dashboard() {
   const topSuggestion = matchSuggestions[0]
   const alternates = matchSuggestions.slice(1, 3)
 
-  // Overcharge warnings only (no resistance warnings)
-  const overchargeMs = settings.overchargeWarningHours * 3_600_000
-  const overchargedSessions = activeChargerSessions.filter(
-    (s) => Date.now() - s.placedAt > overchargeMs,
-  )
-
   return (
     <div className="stack">
-      {/* Overcharge warnings */}
-      {overchargedSessions.map((s) => (
-        <div key={s.id} className="warning-banner">
-          ⚠️ {s.batteryId} has been on charger slot {s.slotNumber} for over {settings.overchargeWarningHours}h
-        </div>
-      ))}
-
       {/* Next match card */}
       {nextMatch ? (
         <div className="card">
@@ -325,22 +310,6 @@ export default function Dashboard() {
               />
             )
           })}
-        </div>
-      </div>
-
-      {/* Active chargers summary */}
-      <div className="card">
-        <h3 style={{ marginBottom: '0.5rem' }}>
-          On Chargers ({activeChargerSessions.length}/{9})
-        </h3>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-          {activeChargerSessions.length === 0
-            ? <span className="text-muted" style={{ fontSize: '0.85rem' }}>None</span>
-            : activeChargerSessions.map((s) => (
-                <span key={s.id} className="badge badge-warning">
-                  {s.batteryId} · S{s.slotNumber}
-                </span>
-              ))}
         </div>
       </div>
 

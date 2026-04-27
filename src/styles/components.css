@@ -165,7 +165,9 @@
   align-items: flex-end;
   justify-content: center;
   z-index: 100;
-  padding: 0;
+  /* Prevent the overlay itself from scrolling/bouncing on iOS */
+  overscroll-behavior: none;
+  touch-action: none;
 }
 @media (min-width: 640px) {
   .modal-overlay { align-items: center; padding: 1rem; }
@@ -178,8 +180,12 @@
   max-width: 480px;
   padding: 1.25rem;
   padding-bottom: calc(1.25rem + var(--safe-bottom));
-  max-height: 85vh;
+  /* dvh = dynamic viewport height — shrinks when mobile browser chrome appears */
+  max-height: min(85dvh, 85vh);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Prevent iOS rubber-banding from the modal leaking to the page */
+  -webkit-overflow-scrolling: touch;
 }
 @media (min-width: 640px) {
   .modal {
