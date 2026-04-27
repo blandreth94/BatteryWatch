@@ -4,20 +4,14 @@ import type { ChargerSession } from '../types'
 
 export const TOTAL_SLOTS = 9
 
-// Returns only currently-active sessions (removedAt === null)
-export function useActiveChargerSessions() {
-  const sessions = useLiveQuery(
-    () => db.chargerSessions.where('removedAt').equals(0).toArray(),
-    [],
-  )
-  // Dexie cannot index null directly; we store null as 0 sentinel in queries
-  // Actually use filter approach instead:
-  return (sessions ?? []).filter((s) => s.removedAt === null)
+export function useAllActiveChargerSessions(): ChargerSession[] {
+  const all = useLiveQuery(() => db.chargerSessions.toArray(), []) ?? []
+  return all.filter((s) => s.removedAt === null)
 }
 
-export function useChargerSessionHistory(batteryId: string) {
+export function useChargerSessionHistory(batteryId: string): ChargerSession[] {
   return useLiveQuery(
-    () => db.chargerSessions.where('batteryId').equals(batteryId).reverse().toArray(),
+    () => db.chargerSessions.where('batteryId').equals(batteryId).reverse().sortBy('placedAt'),
     [batteryId],
   ) ?? []
 }
@@ -27,26 +21,44 @@ export async function placeOnCharger(
   slotNumber: number,
   voltage: number | null,
   resistance: number | null,
-): Promise<void> {
+): Promise<{ ok: boolean; error?: string }> {
+  // Block if the battery is already on a charger or heater — but NOT if it's
+  // in an open usage event (match/practice). Placing on charger IS the return action.
+  const [onCharger, onHeater] = await Promise.all([
+    db.chargerSessions.where('batteryId').equals(batteryId).toArray()
+      .then((rows) => rows.find((r) => r.removedAt === null)),
+    db.heaterSessions.where('batteryId').equals(batteryId).toArray()
+      .then((rows) => rows.find((r) => r.removedAt === null)),
+  ])
+  if (onCharger) return { ok: false, error: `${batteryId} is already on charger slot ${onCharger.slotNumber}` }
+  if (onHeater) return { ok: false, error: `${batteryId} is already on heater ${onHeater.slotNumber}` }
+
+  const now = Date.now()
+
+  // Auto-close any open usage event — placing on charger implicitly returns the battery
+  const openUsageEvent = await db.usageEvents.where('batteryId').equals(batteryId).toArray()
+    .then((rows) => rows.find((r) => r.returnedAt === null))
+  if (openUsageEvent?.id !== undefined) {
+    await db.usageEvents.update(openUsageEvent.id, { returnedAt: now })
+  }
+
   // Close any existing active session for this slot
-  const existing = await db.chargerSessions
-    .where('slotNumber').equals(slotNumber)
-    .toArray()
-  const active = existing.find((s) => s.removedAt === null)
-  if (active?.id !== undefined) {
-    await db.chargerSessions.update(active.id, { removedAt: Date.now() })
+  const existingSlot = await db.chargerSessions.where('slotNumber').equals(slotNumber).toArray()
+  const activeSlot = existingSlot.find((s) => s.removedAt === null)
+  if (activeSlot?.id !== undefined) {
+    await db.chargerSessions.update(activeSlot.id, { removedAt: now })
   }
 
   await db.chargerSessions.add({
-    batteryId,
-    slotNumber,
-    placedAt: Date.now(),
+    batteryId, slotNumber,
+    placedAt: now,
     removedAt: null,
     voltageAtPlacement: voltage,
     voltageAtRemoval: null,
     resistanceAtPlacement: resistance,
     isFullCycle: false,
   })
+  return { ok: true }
 }
 
 export async function removeFromCharger(
@@ -66,9 +78,4 @@ export async function removeFromCharger(
       await db.batteries.update(session.batteryId, { cycleCount: battery.cycleCount + 1 })
     }
   }
-}
-
-export function useAllActiveChargerSessions() {
-  const all = useLiveQuery(() => db.chargerSessions.toArray(), [])
-  return (all ?? []).filter((s) => s.removedAt === null)
 }

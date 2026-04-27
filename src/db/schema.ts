@@ -1,10 +1,11 @@
 import Dexie, { type EntityTable } from 'dexie'
-import type { Battery, ChargerSession, HeaterSession, MatchRecord, AppSettings } from '../types'
+import type { Battery, ChargerSession, HeaterSession, BatteryUsageEvent, MatchRecord, AppSettings } from '../types'
 
 class BatteryWatchDB extends Dexie {
   batteries!: EntityTable<Battery, 'id'>
   chargerSessions!: EntityTable<ChargerSession, 'id'>
   heaterSessions!: EntityTable<HeaterSession, 'id'>
+  usageEvents!: EntityTable<BatteryUsageEvent, 'id'>
   matchRecords!: EntityTable<MatchRecord, 'id'>
   settings!: EntityTable<AppSettings, 'key'>
 
@@ -14,6 +15,14 @@ class BatteryWatchDB extends Dexie {
       batteries: '&id, year, cycleCount, createdAt',
       chargerSessions: '++id, batteryId, slotNumber, placedAt, removedAt',
       heaterSessions: '++id, batteryId, slotNumber, placedAt, removedAt',
+      matchRecords: '++id, matchNumber, batteryId, status, scheduledTime',
+      settings: '&key',
+    })
+    this.version(2).stores({
+      batteries: '&id, year, cycleCount, createdAt',
+      chargerSessions: '++id, batteryId, slotNumber, placedAt, removedAt',
+      heaterSessions: '++id, batteryId, slotNumber, placedAt, removedAt',
+      usageEvents: '++id, batteryId, eventType, matchNumber, takenAt, returnedAt',
       matchRecords: '++id, matchNumber, batteryId, status, scheduledTime',
       settings: '&key',
     })

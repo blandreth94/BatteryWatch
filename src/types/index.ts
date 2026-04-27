@@ -29,6 +29,22 @@ export interface HeaterSession {
   forMatchNumber: number | null;
 }
 
+// Tracks every time a battery leaves the pit (match or practice field).
+export interface BatteryUsageEvent {
+  id?: number;
+  batteryId: string;
+  eventType: 'match' | 'practice';
+  matchNumber: number | null;     // null for practice
+  takenAt: number;                // Unix ms
+  returnedAt: number | null;      // null = still in use
+  takenBy: string;
+  voltageAtTake: number | null;   // V0 reading when taken
+  resistanceAtTake: number | null;
+  fromLocation: 'charger' | 'heater' | 'pit';
+  fromSlot: number | null;
+  notes: string;
+}
+
 export interface MatchRecord {
   id?: number;
   matchNumber: number;
@@ -45,7 +61,7 @@ export interface AppSettings {
   seasonYear: number;
   heaterWarmMinutes: number;          // default 18
   walkAndQueueMinutes: number;        // lead time, default 20
-  resistanceWarningThreshold: number; // milliohms, default 150
+  resistanceWarningThreshold: number; // milliohms, default 150 (kept for recording, not shown)
   overchargeWarningHours: number;     // default 4
   tbaApiKey: string;
   tbaEventKey: string;
@@ -66,7 +82,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
 // Derived types used only by the suggestion engine (never stored)
 
-export type BatteryLocation = 'charger' | 'heater' | 'pit' | 'match'
+export type BatteryLocation = 'charger' | 'heater' | 'pit' | 'in-use'
 
 export interface BatteryStatus {
   battery: Battery
@@ -78,10 +94,11 @@ export interface BatteryStatus {
 
 export interface HeaterSlotSuggestion {
   slotNumber: 1 | 2
-  batteryId: string | null           // null = no action needed
+  batteryId: string | null
   action: 'place_now' | 'place_in' | 'ready' | 'occupied_not_ready' | 'idle'
   minutesUntilPlace: number | null
   minutesWarm: number | null         // how long it has been on heater
+  placedAt: number | null            // absolute timestamp of heater placement
   forMatchNumber: number | null
   minutesUntilDeadline: number | null
 }
