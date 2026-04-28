@@ -248,6 +248,103 @@ async function _buildRow(table: SyncableTable, syncId: string): Promise<Record<s
   }
 }
 
+// ── Row mappers: Supabase row → Dexie record ──────────────────────────────────
+// Shared between pullFromSupabase (bulk) and _applyRealtimeEvent (single row).
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _rowToBattery(r: any): Battery {
+  return {
+    id: r.id, year: r.year, label: r.label,
+    cycleCount: r.cycle_count, internalResistance: r.internal_resistance,
+    notes: r.notes, createdAt: r.created_at,
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _rowToChargerSession(r: any): ChargerSession {
+  return {
+    syncId: r.sync_id, batteryId: r.battery_id, slotNumber: r.slot_number,
+    placedAt: r.placed_at, removedAt: r.removed_at,
+    voltageAtPlacement: r.voltage_at_placement,
+    voltageAtRemoval: r.voltage_at_removal,
+    resistanceAtPlacement: r.resistance_at_placement,
+    isFullCycle: r.is_full_cycle,
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _rowToHeaterSession(r: any): HeaterSession {
+  return {
+    syncId: r.sync_id, batteryId: r.battery_id, slotNumber: r.slot_number,
+    placedAt: r.placed_at, removedAt: r.removed_at, forMatchNumber: r.for_match_number,
+    movedBy: r.moved_by ?? undefined,
+    removedBy: r.removed_by ?? undefined,
+    voltageAtRemoval: r.voltage_at_removal ?? undefined,
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _rowToUsageEvent(r: any): BatteryUsageEvent {
+  return {
+    syncId: r.sync_id, batteryId: r.battery_id, eventType: r.event_type,
+    matchNumber: r.match_number, takenAt: r.taken_at, returnedAt: r.returned_at,
+    takenBy: r.taken_by, voltageAtTake: r.voltage_at_take,
+    resistanceAtTake: r.resistance_at_take, fromLocation: r.from_location,
+    fromSlot: r.from_slot, notes: r.notes,
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _rowToMatchRecord(r: any): MatchRecord {
+  return {
+    syncId: r.sync_id, matchNumber: r.match_number,
+    scheduledTime: r.scheduled_time, batteryId: r.battery_id,
+    completedAt: r.completed_at, status: r.status,
+  }
+}
+
+// ── Apply a single realtime event to Dexie ────────────────────────────────────
+
+async function _applyRealtimeEvent(
+  sbTable: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  eventType: string, newRow: any, oldRow: any,
+): Promise<void> {
+  if (eventType === 'DELETE') {
+    const syncId: string = oldRow.sync_id
+    switch (sbTable) {
+      case 'batteries':        await db.batteries.delete(syncId); break
+      case 'charger_sessions': await db.chargerSessions.where('syncId').equals(syncId).delete(); break
+      case 'heater_sessions':  await db.heaterSessions.where('syncId').equals(syncId).delete(); break
+      case 'usage_events':     await db.usageEvents.where('syncId').equals(syncId).delete(); break
+      case 'match_records':    await db.matchRecords.where('syncId').equals(syncId).delete(); break
+      case 'app_settings':     await db.settings.delete('settings'); break
+    }
+    return
+  }
+
+  // INSERT or UPDATE — newRow contains the full row
+  switch (sbTable) {
+    case 'batteries':        await db.batteries.put(_rowToBattery(newRow)); break
+    case 'charger_sessions': await _upsertBySyncId(db.chargerSessions, [_rowToChargerSession(newRow)]); break
+    case 'heater_sessions':  await _upsertBySyncId(db.heaterSessions, [_rowToHeaterSession(newRow)]); break
+    case 'usage_events':     await _upsertBySyncId(db.usageEvents, [_rowToUsageEvent(newRow)]); break
+    case 'match_records':    await _upsertBySyncId(db.matchRecords, [_rowToMatchRecord(newRow)]); break
+    case 'app_settings': {
+      const existing = await db.settings.get('settings')
+      await db.settings.put({
+        ...(existing ?? DEFAULT_SETTINGS),
+        key: 'settings',
+        eventName: newRow.event_name, teamNumber: newRow.team_number,
+        seasonYear: newRow.season_year, heaterWarmMinutes: newRow.heater_warm_minutes,
+        walkAndQueueMinutes: newRow.walk_and_queue_minutes,
+        tbaApiKey: newRow.tba_api_key, tbaEventKey: newRow.tba_event_key,
+      } as AppSettings)
+      break
+    }
+  }
+}
+
 // ── Pull from Supabase ────────────────────────────────────────────────────────
 
 export async function pullFromSupabase(): Promise<void> {
@@ -265,7 +362,6 @@ export async function pullFromSupabase(): Promise<void> {
     supabase.from('app_settings').select('*').eq('team_id', tid),
   ])
 
-  // Check for errors
   for (const res of [bRes, csRes, hsRes, ueRes, mrRes, sRes]) {
     if (res.error) throw new Error(res.error.message)
   }
@@ -274,74 +370,22 @@ export async function pullFromSupabase(): Promise<void> {
     'rw',
     [db.batteries, db.chargerSessions, db.heaterSessions, db.usageEvents, db.matchRecords, db.settings],
     async () => {
-      if (bRes.data?.length) {
-        await db.batteries.bulkPut(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          bRes.data.map((r: any): Battery => ({
-            id: r.id, year: r.year, label: r.label,
-            cycleCount: r.cycle_count, internalResistance: r.internal_resistance,
-            notes: r.notes, createdAt: r.created_at,
-          })),
-        )
-      }
-
-      if (csRes.data?.length) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await _upsertBySyncId(db.chargerSessions, csRes.data.map((r: any): ChargerSession => ({
-          syncId: r.sync_id, batteryId: r.battery_id, slotNumber: r.slot_number,
-          placedAt: r.placed_at, removedAt: r.removed_at,
-          voltageAtPlacement: r.voltage_at_placement,
-          voltageAtRemoval: r.voltage_at_removal,
-          resistanceAtPlacement: r.resistance_at_placement,
-          isFullCycle: r.is_full_cycle,
-        })))
-      }
-
-      if (hsRes.data?.length) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await _upsertBySyncId(db.heaterSessions, hsRes.data.map((r: any): HeaterSession => ({
-          syncId: r.sync_id, batteryId: r.battery_id, slotNumber: r.slot_number,
-          placedAt: r.placed_at, removedAt: r.removed_at, forMatchNumber: r.for_match_number,
-          movedBy: r.moved_by ?? undefined,
-          removedBy: r.removed_by ?? undefined,
-          voltageAtRemoval: r.voltage_at_removal ?? undefined,
-        })))
-      }
-
-      if (ueRes.data?.length) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await _upsertBySyncId(db.usageEvents, ueRes.data.map((r: any): BatteryUsageEvent => ({
-          syncId: r.sync_id, batteryId: r.battery_id, eventType: r.event_type,
-          matchNumber: r.match_number, takenAt: r.taken_at, returnedAt: r.returned_at,
-          takenBy: r.taken_by, voltageAtTake: r.voltage_at_take,
-          resistanceAtTake: r.resistance_at_take, fromLocation: r.from_location,
-          fromSlot: r.from_slot, notes: r.notes,
-        })))
-      }
-
-      if (mrRes.data?.length) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await _upsertBySyncId(db.matchRecords, mrRes.data.map((r: any): MatchRecord => ({
-          syncId: r.sync_id, matchNumber: r.match_number,
-          scheduledTime: r.scheduled_time, batteryId: r.battery_id,
-          completedAt: r.completed_at, status: r.status,
-        })))
-      }
+      if (bRes.data?.length) await db.batteries.bulkPut(bRes.data.map(_rowToBattery))
+      if (csRes.data?.length) await _upsertBySyncId(db.chargerSessions, csRes.data.map(_rowToChargerSession))
+      if (hsRes.data?.length) await _upsertBySyncId(db.heaterSessions, hsRes.data.map(_rowToHeaterSession))
+      if (ueRes.data?.length) await _upsertBySyncId(db.usageEvents, ueRes.data.map(_rowToUsageEvent))
+      if (mrRes.data?.length) await _upsertBySyncId(db.matchRecords, mrRes.data.map(_rowToMatchRecord))
 
       if (sRes.data?.[0]) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const r = sRes.data[0] as any
+        const r = sRes.data[0]
         const existing = await db.settings.get('settings')
         await db.settings.put({
           ...(existing ?? DEFAULT_SETTINGS),
           key: 'settings',
-          eventName: r.event_name,
-          teamNumber: r.team_number,
-          seasonYear: r.season_year,
-          heaterWarmMinutes: r.heater_warm_minutes,
+          eventName: r.event_name, teamNumber: r.team_number,
+          seasonYear: r.season_year, heaterWarmMinutes: r.heater_warm_minutes,
           walkAndQueueMinutes: r.walk_and_queue_minutes,
-          tbaApiKey: r.tba_api_key,
-          tbaEventKey: r.tba_event_key,
+          tbaApiKey: r.tba_api_key, tbaEventKey: r.tba_event_key,
         } as AppSettings)
       }
     },
@@ -388,11 +432,32 @@ export async function initSync(): Promise<void> {
     }
   })
 
-  // Poll every 30 s for always-open displays (TV/PC) so they stay current
-  // without any user action
+  // Realtime: subscribe to row-level changes on all tables so every client
+  // receives updates instantly (~100–200 ms) without polling
+  const supabase = getSupabase()
+  if (supabase) {
+    const tid = _tid()
+    const sbTables = ['batteries', 'charger_sessions', 'heater_sessions', 'usage_events', 'match_records', 'app_settings']
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let channel: any = supabase.channel('bw-sync')
+    for (const table of sbTables) {
+      channel = channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table, filter: `team_id=eq.${tid}` },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (payload: any) => {
+          _applyRealtimeEvent(table, payload.eventType, payload.new, payload.old).catch(() => {})
+        },
+      )
+    }
+    channel.subscribe()
+  }
+
+  // Fallback full-pull every 5 min to catch any events missed during a
+  // WebSocket reconnect gap
   setInterval(() => {
     if (isCloudMode()) pullFromSupabase().catch(() => {})
-  }, 30_000)
+  }, 5 * 60_000)
 
   _status = { ..._status, pending: await db.pendingSync.count() }
   _notify()
