@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/schema'
+import { enqueueSync, flushSync } from '../sync/syncEngine'
 import type { ChargerSession } from '../types'
 
 export const TOTAL_SLOTS = 9
@@ -40,6 +41,7 @@ export async function placeOnCharger(
     .then((rows) => rows.find((r) => r.returnedAt === null))
   if (openUsageEvent?.id !== undefined) {
     await db.usageEvents.update(openUsageEvent.id, { returnedAt: now })
+    if (openUsageEvent.syncId) await enqueueSync('usageEvents', openUsageEvent.syncId)
   }
 
   // Close any existing active session for this slot
@@ -47,17 +49,18 @@ export async function placeOnCharger(
   const activeSlot = existingSlot.find((s) => s.removedAt === null)
   if (activeSlot?.id !== undefined) {
     await db.chargerSessions.update(activeSlot.id, { removedAt: now })
+    if (activeSlot.syncId) await enqueueSync('chargerSessions', activeSlot.syncId)
   }
 
+  const syncId = crypto.randomUUID()
   await db.chargerSessions.add({
-    batteryId, slotNumber,
-    placedAt: now,
-    removedAt: null,
-    voltageAtPlacement: voltage,
-    voltageAtRemoval: null,
-    resistanceAtPlacement: resistance,
-    isFullCycle: false,
+    syncId, batteryId, slotNumber,
+    placedAt: now, removedAt: null,
+    voltageAtPlacement: voltage, voltageAtRemoval: null,
+    resistanceAtPlacement: resistance, isFullCycle: false,
   })
+  await enqueueSync('chargerSessions', syncId)
+  flushSync()
   return { ok: true }
 }
 
@@ -76,6 +79,9 @@ export async function removeFromCharger(
     const battery = await db.batteries.get(session.batteryId)
     if (battery) {
       await db.batteries.update(session.batteryId, { cycleCount: battery.cycleCount + 1 })
+      await enqueueSync('batteries', session.batteryId)
     }
   }
+  if (session.syncId) await enqueueSync('chargerSessions', session.syncId)
+  flushSync()
 }

@@ -4,6 +4,7 @@ import { db } from '../db/schema'
 import type { AppSettings } from '../types'
 import { DEFAULT_SETTINGS } from '../types'
 import { ENV_TBA_API_KEY, ENV_TBA_EVENT_KEY, ENV_EVENT_NAME, ENV_TEAM_NUMBER } from '../env'
+import { enqueueSync, flushSync } from '../sync/syncEngine'
 
 // Overlay env vars on top of stored settings so the rest of the app
 // (TBA import, suggestion engine, header) always gets the right values
@@ -32,4 +33,8 @@ export async function saveSettings(partial: Partial<AppSettings>): Promise<void>
   } else {
     await db.settings.add({ ...DEFAULT_SETTINGS, ...partial })
   }
+  // Use team_id string as the syncId for the single-row settings record
+  const teamId = partial.teamNumber ?? existing?.teamNumber ?? DEFAULT_SETTINGS.teamNumber
+  await enqueueSync('settings', String(teamId))
+  flushSync()
 }

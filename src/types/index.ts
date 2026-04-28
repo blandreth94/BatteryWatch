@@ -10,6 +10,7 @@ export interface Battery {
 
 export interface ChargerSession {
   id?: number;
+  syncId?: string;     // UUID assigned at creation; used for cloud sync
   batteryId: string;
   slotNumber: number;              // 1–9
   placedAt: number;                // Unix ms
@@ -22,6 +23,7 @@ export interface ChargerSession {
 
 export interface HeaterSession {
   id?: number;
+  syncId?: string;
   batteryId: string;
   slotNumber: 1 | 2;              // two heater slots
   placedAt: number;
@@ -32,6 +34,7 @@ export interface HeaterSession {
 // Tracks every time a battery leaves the pit (match or practice field).
 export interface BatteryUsageEvent {
   id?: number;
+  syncId?: string;
   batteryId: string;
   eventType: 'match' | 'practice';
   matchNumber: number | null;     // null for practice
@@ -47,6 +50,7 @@ export interface BatteryUsageEvent {
 
 export interface MatchRecord {
   id?: number;
+  syncId?: string;
   matchNumber: number;
   scheduledTime: number;          // Unix ms
   batteryId: string | null;
@@ -74,6 +78,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   walkAndQueueMinutes: 20,
   tbaApiKey: '',
   tbaEventKey: '',
+}
+
+// Offline sync queue — records waiting to be pushed to Supabase
+export interface PendingSync {
+  table: string
+  syncId: string
+  operation: 'upsert' | 'delete'
+  queuedAt: number
 }
 
 // Derived types used only by the suggestion engine (never stored)

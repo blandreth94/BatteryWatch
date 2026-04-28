@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/schema'
 import { isBatteryAvailable } from './useUsageEvents'
+import { enqueueSync, flushSync } from '../sync/syncEngine'
 import type { HeaterSession } from '../types'
 
 export function useActiveHeaterSessions(): HeaterSession[] {
@@ -20,7 +21,6 @@ export async function placeOnHeater(
   slotNumber: 1 | 2,
   forMatchNumber: number | null,
 ): Promise<{ ok: boolean; error?: string }> {
-  // Validate battery isn't already somewhere else
   const availability = await isBatteryAvailable(batteryId)
   if (!availability.available) return { ok: false, error: availability.reason }
 
@@ -29,18 +29,23 @@ export async function placeOnHeater(
   const active = existing.find((s) => s.removedAt === null)
   if (active?.id !== undefined) {
     await db.heaterSessions.update(active.id, { removedAt: Date.now() })
+    if (active.syncId) await enqueueSync('heaterSessions', active.syncId)
   }
 
+  const syncId = crypto.randomUUID()
   await db.heaterSessions.add({
-    batteryId, slotNumber,
-    placedAt: Date.now(),
-    removedAt: null,
+    syncId, batteryId, slotNumber,
+    placedAt: Date.now(), removedAt: null,
     forMatchNumber,
   })
+  await enqueueSync('heaterSessions', syncId)
+  flushSync()
   return { ok: true }
 }
 
 export async function removeFromHeater(session: HeaterSession): Promise<void> {
   if (session.id === undefined) return
   await db.heaterSessions.update(session.id, { removedAt: Date.now() })
+  if (session.syncId) await enqueueSync('heaterSessions', session.syncId)
+  flushSync()
 }

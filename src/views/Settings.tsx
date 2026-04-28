@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useSettings, saveSettings } from '../store/useSettings'
+import { useSyncStatus, isCloudMode, isCloudModeLocked, setStorageMode, flushSync, pullFromSupabase, isSupabaseConfigured } from '../store/useSync'
 import { db } from '../db/schema'
 import { ENV_TBA_API_KEY, ENV_TBA_EVENT_KEY, ENV_EVENT_NAME, ENV_TEAM_NUMBER } from '../env'
 import type { AppSettings } from '../types'
@@ -39,6 +40,10 @@ export default function Settings() {
   const [importStatus, setImportStatus] = useState('')
   const [confirmClear, setConfirmClear] = useState(false)
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'upToDate'>('idle')
+  const [cloudEnabled, setCloudEnabled] = useState(isCloudMode)
+  const [pulling, setPulling] = useState(false)
+  const [pullMessage, setPullMessage] = useState('')
+  const syncStatus = useSyncStatus()
 
   useEffect(() => { setForm(settings) }, [settings])
 
@@ -104,6 +109,37 @@ export default function Settings() {
     } catch {
       setImportStatus('❌ Import failed — invalid file')
     }
+  }
+
+  function handleToggleCloud() {
+    const next = !cloudEnabled
+    setStorageMode(next ? 'cloud' : 'local')
+    setCloudEnabled(next)
+    if (next) flushSync()
+  }
+
+  async function handlePullFromCloud() {
+    setPulling(true)
+    setPullMessage('')
+    try {
+      await pullFromSupabase()
+      setPullMessage('✅ Pulled latest data from cloud')
+    } catch (e) {
+      setPullMessage(`❌ ${e instanceof Error ? e.message : 'Pull failed'}`)
+    }
+    setPulling(false)
+    setTimeout(() => setPullMessage(''), 5000)
+  }
+
+  function syncStatusLabel(): string {
+    if (syncStatus.syncing) return '⟳ Syncing…'
+    if (syncStatus.error) return `⚠️ ${syncStatus.error}`
+    if (syncStatus.lastSyncedAt) {
+      const diff = Math.floor((Date.now() - syncStatus.lastSyncedAt) / 60_000)
+      const ago = diff < 1 ? 'just now' : diff < 60 ? `${diff}m ago` : `${Math.floor(diff / 60)}h ago`
+      return `✅ Last synced ${ago}`
+    }
+    return 'Not yet synced this session'
   }
 
   async function handleCheckUpdate() {
@@ -215,6 +251,50 @@ export default function Settings() {
       <button className="btn-primary" style={{ width: '100%', padding: '0.75rem' }} onClick={handleSave}>
         {saved ? '✅ Saved' : 'Save settings'}
       </button>
+
+      <div className="card">
+        <h2 style={{ marginBottom: '0.75rem' }}>Storage</h2>
+        {!isSupabaseConfigured() ? (
+          <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
+            Cloud sync is not configured. Set <code>VITE_SUPABASE_URL</code> and{' '}
+            <code>VITE_SUPABASE_ANON_KEY</code> to enable it.
+          </p>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+              <span style={{ fontSize: '0.9rem', flex: 1 }}>Cloud sync</span>
+              {isCloudModeLocked() ? (
+                <><span style={{ fontSize: '0.9rem', fontWeight: 600 }}>{cloudEnabled ? 'On' : 'Off'}</span><EnvBadge /></>
+              ) : (
+                <button
+                  className={cloudEnabled ? 'btn-primary' : 'btn-ghost'}
+                  style={{ padding: '0.3rem 1rem', fontSize: '0.85rem' }}
+                  onClick={handleToggleCloud}
+                >
+                  {cloudEnabled ? 'On' : 'Off'}
+                </button>
+              )}
+            </div>
+            {cloudEnabled && (
+              <div className="stack" style={{ gap: '0.4rem' }}>
+                <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
+                  {syncStatusLabel()}
+                  {syncStatus.pending > 0 && ` · ${syncStatus.pending} upload${syncStatus.pending !== 1 ? 's' : ''} pending`}
+                </p>
+                <div className="row" style={{ gap: '0.5rem' }}>
+                  <button className="btn-ghost" style={{ flex: 1, fontSize: '0.82rem' }} onClick={() => flushSync()}>
+                    Push to cloud
+                  </button>
+                  <button className="btn-ghost" style={{ flex: 1, fontSize: '0.82rem' }} onClick={handlePullFromCloud} disabled={pulling}>
+                    {pulling ? 'Pulling…' : 'Pull from cloud'}
+                  </button>
+                </div>
+                {pullMessage && <p style={{ fontSize: '0.82rem' }}>{pullMessage}</p>}
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       <div className="card">
         <h2 style={{ marginBottom: '1rem' }}>App</h2>

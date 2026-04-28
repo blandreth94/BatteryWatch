@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/schema'
+import { enqueueSync, flushSync } from '../sync/syncEngine'
 import type { BatteryUsageEvent } from '../types'
 
 export function useUsageEvents(batteryId?: string): BatteryUsageEvent[] {
@@ -32,12 +33,18 @@ export async function isBatteryAvailable(batteryId: string): Promise<{ available
   return { available: true }
 }
 
-export async function recordUsageEvent(event: Omit<BatteryUsageEvent, 'id'>): Promise<void> {
-  await db.usageEvents.add(event)
+export async function recordUsageEvent(event: Omit<BatteryUsageEvent, 'id' | 'syncId'>): Promise<void> {
+  const syncId = crypto.randomUUID()
+  await db.usageEvents.add({ ...event, syncId })
+  await enqueueSync('usageEvents', syncId)
+  flushSync()
 }
 
 export async function returnBattery(eventId: number): Promise<void> {
   await db.usageEvents.update(eventId, { returnedAt: Date.now() })
+  const updated = await db.usageEvents.get(eventId)
+  if (updated?.syncId) await enqueueSync('usageEvents', updated.syncId)
+  flushSync()
 }
 
 // Build a map of batteryId → most recent takenAt for use by the suggestion engine.

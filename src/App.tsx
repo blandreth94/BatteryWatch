@@ -1,6 +1,8 @@
+import { useEffect } from 'react'
 import { HashRouter, NavLink, Route, Routes } from 'react-router-dom'
 import { useMatchSchedule } from './store/useMatchSchedule'
 import { useSettings } from './store/useSettings'
+import { initSync } from './sync/syncEngine'
 import Dashboard from './views/Dashboard'
 import ChargerBoard from './views/ChargerBoard'
 import Batteries from './views/Batteries'
@@ -65,6 +67,8 @@ function Nav() {
 }
 
 export default function App() {
+  useEffect(() => { initSync() }, [])
+
   return (
     <HashRouter>
       <div className="app-shell">

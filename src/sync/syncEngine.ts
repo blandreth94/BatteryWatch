@@ -1,0 +1,351 @@
+import { db } from '../db/schema'
+import { getSupabase, isSupabaseConfigured } from './supabaseClient'
+import { ENV_STORAGE_MODE, ENV_TEAM_NUMBER } from '../env'
+import type { Battery, ChargerSession, HeaterSession, BatteryUsageEvent, MatchRecord, AppSettings, PendingSync } from '../types'
+import { DEFAULT_SETTINGS } from '../types'
+
+// ── Table name mapping (Dexie camelCase → Supabase snake_case) ────────────────
+
+export type SyncableTable =
+  | 'batteries'
+  | 'chargerSessions'
+  | 'heaterSessions'
+  | 'usageEvents'
+  | 'matchRecords'
+  | 'settings'
+
+const SB_TABLE: Record<SyncableTable, string> = {
+  batteries: 'batteries',
+  chargerSessions: 'charger_sessions',
+  heaterSessions: 'heater_sessions',
+  usageEvents: 'usage_events',
+  matchRecords: 'match_records',
+  settings: 'app_settings',
+}
+
+// ── Mode ──────────────────────────────────────────────────────────────────────
+
+export function isCloudModeLocked(): boolean {
+  return ENV_STORAGE_MODE === 'cloud' || ENV_STORAGE_MODE === 'local'
+}
+
+export function isCloudMode(): boolean {
+  if (!isSupabaseConfigured()) return false
+  if (ENV_STORAGE_MODE === 'cloud') return true
+  if (ENV_STORAGE_MODE === 'local') return false
+  return localStorage.getItem('storageMode') !== 'local'
+}
+
+export function setStorageMode(mode: 'cloud' | 'local'): void {
+  localStorage.setItem('storageMode', mode)
+}
+
+// ── Sync status ───────────────────────────────────────────────────────────────
+
+export interface SyncStatus {
+  pending: number
+  lastSyncedAt: number | null
+  syncing: boolean
+  error: string | null
+}
+
+let _status: SyncStatus = { pending: 0, lastSyncedAt: null, syncing: false, error: null }
+const _listeners = new Set<() => void>()
+
+function _notify() { _listeners.forEach((fn) => fn()) }
+
+export function subscribeSyncStatus(fn: () => void): () => void {
+  _listeners.add(fn)
+  return () => _listeners.delete(fn)
+}
+
+export function getSyncStatus(): SyncStatus { return { ..._status } }
+
+// ── Enqueue ───────────────────────────────────────────────────────────────────
+
+export async function enqueueSync(
+  table: SyncableTable,
+  syncId: string,
+  operation: 'upsert' | 'delete' = 'upsert',
+): Promise<void> {
+  if (!isCloudMode()) return
+  // Compound primary key auto-deduplicates: put() replaces any existing entry
+  // for the same (table, syncId) pair, updating to the latest operation.
+  await db.pendingSync.put({ table, syncId, operation, queuedAt: Date.now() })
+  _status = { ..._status, pending: await db.pendingSync.count() }
+  _notify()
+}
+
+// ── Flush ─────────────────────────────────────────────────────────────────────
+
+let _flushTimer: ReturnType<typeof setTimeout> | null = null
+
+export function flushSync(): void {
+  if (!isCloudMode() || _flushTimer) return
+  _flushTimer = setTimeout(async () => {
+    _flushTimer = null
+    await _doFlush()
+  }, 500)
+}
+
+async function _doFlush(): Promise<void> {
+  if (!navigator.onLine) return
+  const supabase = getSupabase()
+  if (!supabase) return
+
+  const pending = await db.pendingSync.orderBy('queuedAt').toArray()
+  if (pending.length === 0) return
+
+  _status = { ..._status, syncing: true, error: null }
+  _notify()
+
+  let failed = 0
+  for (const item of pending) {
+    try {
+      await _syncItem(item)
+      await db.pendingSync.delete([item.table, item.syncId])
+    } catch {
+      failed++
+    }
+  }
+
+  const remaining = await db.pendingSync.count()
+  _status = {
+    pending: remaining,
+    lastSyncedAt: remaining === 0 ? Date.now() : _status.lastSyncedAt,
+    syncing: false,
+    error: failed > 0 ? `${failed} item(s) failed — will retry` : null,
+  }
+  _notify()
+}
+
+async function _syncItem(item: PendingSync): Promise<void> {
+  const supabase = getSupabase()!
+  const sbTable = SB_TABLE[item.table as SyncableTable]
+
+  if (item.operation === 'delete') {
+    const { error } = await supabase.from(sbTable).delete().eq('sync_id', item.syncId)
+    if (error) throw error
+    return
+  }
+
+  const row = await _buildRow(item.table as SyncableTable, item.syncId)
+  if (!row) return // record deleted locally before sync could run
+
+  const { error } = await supabase.from(sbTable).upsert(row, { onConflict: 'sync_id' })
+  if (error) throw error
+}
+
+// ── Row builders: Dexie record → Supabase row ─────────────────────────────────
+
+const _tid = (): number => ENV_TEAM_NUMBER || 401
+
+async function _buildRow(table: SyncableTable, syncId: string): Promise<Record<string, unknown> | null> {
+  const tid = _tid()
+  switch (table) {
+    case 'batteries': {
+      const r = await db.batteries.get(syncId) // battery syncId === battery id
+      if (!r) return null
+      return {
+        sync_id: r.id, team_id: tid,
+        id: r.id, year: r.year, label: r.label,
+        cycle_count: r.cycleCount, internal_resistance: r.internalResistance,
+        notes: r.notes, created_at: r.createdAt,
+      }
+    }
+    case 'chargerSessions': {
+      const r = await db.chargerSessions.where('syncId').equals(syncId).first()
+      if (!r) return null
+      return {
+        sync_id: r.syncId, team_id: tid,
+        battery_id: r.batteryId, slot_number: r.slotNumber,
+        placed_at: r.placedAt, removed_at: r.removedAt,
+        voltage_at_placement: r.voltageAtPlacement,
+        voltage_at_removal: r.voltageAtRemoval,
+        resistance_at_placement: r.resistanceAtPlacement,
+        is_full_cycle: r.isFullCycle,
+      }
+    }
+    case 'heaterSessions': {
+      const r = await db.heaterSessions.where('syncId').equals(syncId).first()
+      if (!r) return null
+      return {
+        sync_id: r.syncId, team_id: tid,
+        battery_id: r.batteryId, slot_number: r.slotNumber,
+        placed_at: r.placedAt, removed_at: r.removedAt,
+        for_match_number: r.forMatchNumber,
+      }
+    }
+    case 'usageEvents': {
+      const r = await db.usageEvents.where('syncId').equals(syncId).first()
+      if (!r) return null
+      return {
+        sync_id: r.syncId, team_id: tid,
+        battery_id: r.batteryId, event_type: r.eventType,
+        match_number: r.matchNumber, taken_at: r.takenAt,
+        returned_at: r.returnedAt, taken_by: r.takenBy,
+        voltage_at_take: r.voltageAtTake,
+        resistance_at_take: r.resistanceAtTake,
+        from_location: r.fromLocation, from_slot: r.fromSlot,
+        notes: r.notes,
+      }
+    }
+    case 'matchRecords': {
+      const r = await db.matchRecords.where('syncId').equals(syncId).first()
+      if (!r) return null
+      return {
+        sync_id: r.syncId, team_id: tid,
+        match_number: r.matchNumber, scheduled_time: r.scheduledTime,
+        battery_id: r.batteryId, completed_at: r.completedAt,
+        status: r.status,
+      }
+    }
+    case 'settings': {
+      const r = await db.settings.get('settings')
+      if (!r) return null
+      return {
+        sync_id: String(tid), team_id: tid,
+        event_name: r.eventName, team_number: r.teamNumber,
+        season_year: r.seasonYear,
+        heater_warm_minutes: r.heaterWarmMinutes,
+        walk_and_queue_minutes: r.walkAndQueueMinutes,
+        tba_api_key: r.tbaApiKey, tba_event_key: r.tbaEventKey,
+      }
+    }
+  }
+}
+
+// ── Pull from Supabase ────────────────────────────────────────────────────────
+
+export async function pullFromSupabase(): Promise<void> {
+  const supabase = getSupabase()
+  if (!supabase) throw new Error('Supabase not configured')
+
+  const tid = _tid()
+
+  const [bRes, csRes, hsRes, ueRes, mrRes, sRes] = await Promise.all([
+    supabase.from('batteries').select('*').eq('team_id', tid),
+    supabase.from('charger_sessions').select('*').eq('team_id', tid),
+    supabase.from('heater_sessions').select('*').eq('team_id', tid),
+    supabase.from('usage_events').select('*').eq('team_id', tid),
+    supabase.from('match_records').select('*').eq('team_id', tid),
+    supabase.from('app_settings').select('*').eq('team_id', tid),
+  ])
+
+  // Check for errors
+  for (const res of [bRes, csRes, hsRes, ueRes, mrRes, sRes]) {
+    if (res.error) throw new Error(res.error.message)
+  }
+
+  await db.transaction(
+    'rw',
+    [db.batteries, db.chargerSessions, db.heaterSessions, db.usageEvents, db.matchRecords, db.settings],
+    async () => {
+      if (bRes.data?.length) {
+        await db.batteries.bulkPut(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          bRes.data.map((r: any): Battery => ({
+            id: r.id, year: r.year, label: r.label,
+            cycleCount: r.cycle_count, internalResistance: r.internal_resistance,
+            notes: r.notes, createdAt: r.created_at,
+          })),
+        )
+      }
+
+      if (csRes.data?.length) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await _upsertBySyncId(db.chargerSessions, csRes.data.map((r: any): ChargerSession => ({
+          syncId: r.sync_id, batteryId: r.battery_id, slotNumber: r.slot_number,
+          placedAt: r.placed_at, removedAt: r.removed_at,
+          voltageAtPlacement: r.voltage_at_placement,
+          voltageAtRemoval: r.voltage_at_removal,
+          resistanceAtPlacement: r.resistance_at_placement,
+          isFullCycle: r.is_full_cycle,
+        })))
+      }
+
+      if (hsRes.data?.length) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await _upsertBySyncId(db.heaterSessions, hsRes.data.map((r: any): HeaterSession => ({
+          syncId: r.sync_id, batteryId: r.battery_id, slotNumber: r.slot_number,
+          placedAt: r.placed_at, removedAt: r.removed_at, forMatchNumber: r.for_match_number,
+        })))
+      }
+
+      if (ueRes.data?.length) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await _upsertBySyncId(db.usageEvents, ueRes.data.map((r: any): BatteryUsageEvent => ({
+          syncId: r.sync_id, batteryId: r.battery_id, eventType: r.event_type,
+          matchNumber: r.match_number, takenAt: r.taken_at, returnedAt: r.returned_at,
+          takenBy: r.taken_by, voltageAtTake: r.voltage_at_take,
+          resistanceAtTake: r.resistance_at_take, fromLocation: r.from_location,
+          fromSlot: r.from_slot, notes: r.notes,
+        })))
+      }
+
+      if (mrRes.data?.length) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await _upsertBySyncId(db.matchRecords, mrRes.data.map((r: any): MatchRecord => ({
+          syncId: r.sync_id, matchNumber: r.match_number,
+          scheduledTime: r.scheduled_time, batteryId: r.battery_id,
+          completedAt: r.completed_at, status: r.status,
+        })))
+      }
+
+      if (sRes.data?.[0]) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const r = sRes.data[0] as any
+        const existing = await db.settings.get('settings')
+        await db.settings.put({
+          ...(existing ?? DEFAULT_SETTINGS),
+          key: 'settings',
+          eventName: r.event_name,
+          teamNumber: r.team_number,
+          seasonYear: r.season_year,
+          heaterWarmMinutes: r.heater_warm_minutes,
+          walkAndQueueMinutes: r.walk_and_queue_minutes,
+          tbaApiKey: r.tba_api_key,
+          tbaEventKey: r.tba_event_key,
+        } as AppSettings)
+      }
+    },
+  )
+
+  _status = { ..._status, lastSyncedAt: Date.now(), error: null }
+  _notify()
+}
+
+// Upsert records into a Dexie table that uses ++id as PK, matching by syncId.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function _upsertBySyncId(table: any, records: Array<{ syncId?: string }>) {
+  for (const record of records) {
+    if (!record.syncId) continue
+    const existing = await table.where('syncId').equals(record.syncId).first()
+    if (existing?.id !== undefined) {
+      await table.update(existing.id, record)
+    } else {
+      await table.add(record)
+    }
+  }
+}
+
+// ── Init (called once on app start) ──────────────────────────────────────────
+
+export async function initSync(): Promise<void> {
+  if (!isCloudMode()) return
+
+  // Auto-pull on first launch (empty local DB) to hydrate from cloud
+  const batteryCount = await db.batteries.count()
+  if (batteryCount === 0) {
+    try { await pullFromSupabase() } catch { /* silent — user can pull manually */ }
+  }
+
+  // Flush any operations queued during a previous offline session
+  flushSync()
+
+  // Reconnect handler
+  window.addEventListener('online', () => flushSync())
+
+  _status = { ..._status, pending: await db.pendingSync.count() }
+  _notify()
+}

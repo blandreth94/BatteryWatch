@@ -8,3 +8,8 @@ export const ENV_EVENT_NAME: string = import.meta.env.VITE_EVENT_NAME ?? ''
 export const ENV_TEAM_NUMBER: number = import.meta.env.VITE_TEAM_NUMBER
   ? parseInt(import.meta.env.VITE_TEAM_NUMBER as string, 10)
   : 0
+
+export const ENV_SUPABASE_URL: string = import.meta.env.VITE_SUPABASE_URL ?? ''
+export const ENV_SUPABASE_ANON_KEY: string = import.meta.env.VITE_SUPABASE_ANON_KEY ?? ''
+// 'cloud' | 'local' — forces mode when set; otherwise user-controlled via Settings toggle.
+export const ENV_STORAGE_MODE: string = import.meta.env.VITE_STORAGE_MODE ?? ''
