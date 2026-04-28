@@ -35,6 +35,7 @@ export default function Settings() {
   const settings = useSettings()
   const [form, setForm] = useState<AppSettings>(settings)
   const [saved, setSaved] = useState(false)
+  const [heaterSlotError, setHeaterSlotError] = useState('')
   const [exporting, setExporting] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importStatus, setImportStatus] = useState('')
@@ -63,6 +64,20 @@ export default function Settings() {
   }
 
   async function handleSave() {
+    setHeaterSlotError('')
+
+    if (form.heaterSlotCount < settings.heaterSlotCount) {
+      const activeSessions = await db.heaterSessions.toArray()
+      const occupied = activeSessions
+        .filter((s) => s.removedAt === null && s.slotNumber > form.heaterSlotCount)
+        .map((s) => s.slotNumber)
+      if (occupied.length > 0) {
+        const slots = [...new Set(occupied)].sort().join(', ')
+        setHeaterSlotError(`Remove the battery from heater slot${occupied.length > 1 ? 's' : ''} ${slots} before reducing the slot count.`)
+        return
+      }
+    }
+
     // Never overwrite fields that are controlled by env vars
     const patch: Partial<AppSettings> = { ...form }
     if (envLocked.tbaApiKey)   delete patch.tbaApiKey
@@ -234,6 +249,11 @@ export default function Settings() {
           <div className="form-group">
             <label>Heater slots</label>
             <input type="number" min={1} max={6} step={1} {...field('heaterSlotCount')} />
+            {heaterSlotError && (
+              <p style={{ color: 'var(--color-danger, #e05)', fontSize: '0.8rem', marginTop: '0.35rem' }}>
+                {heaterSlotError}
+              </p>
+            )}
           </div>
         </div>
       </div>
