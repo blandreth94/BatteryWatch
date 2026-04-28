@@ -406,13 +406,14 @@ interface ChargerSlotModalProps {
   lastUsageEvent: BatteryUsageEvent | undefined
   availableHeaterSlot: 1 | 2 | null
   nextMatchNumber: number | null
+  defaultBatteryId?: string
   onMoveToHeater: () => void
   onClose: () => void
 }
 
-function ChargerSlotModal({ slotNumber, existingSession, lastUsageEvent, availableHeaterSlot, nextMatchNumber, onMoveToHeater, onClose }: ChargerSlotModalProps) {
+function ChargerSlotModal({ slotNumber, existingSession, lastUsageEvent, availableHeaterSlot, nextMatchNumber, defaultBatteryId, onMoveToHeater, onClose }: ChargerSlotModalProps) {
   const batteries = useBatteries()
-  const [batteryId, setBatteryId] = useState(existingSession?.batteryId ?? '')
+  const [batteryId, setBatteryId] = useState(existingSession?.batteryId ?? defaultBatteryId ?? '')
   const [voltage, setVoltage] = useState('')
   const [resistance, setResistance] = useState('')
   const [voltageOut, setVoltageOut] = useState('')
@@ -609,10 +610,10 @@ export default function Dashboard() {
   const { heaterSuggestions, matchSuggestions } = useSuggestions()
   const activeHeaterSessions = useActiveHeaterSessions()
   const activeSessions = useAllActiveChargerSessions()
+  const allBatteries = useBatteries()
   const settings = useSettings()
   const upcomingMatches = useUpcomingMatches()
   const allUsageEvents = useUsageEvents()
-  const allChargerSessions = useLiveQuery(() => db.chargerSessions.toArray(), []) ?? []
 
   const [takeForMatchTarget, setTakeForMatchTarget] = useState<{ suggestion: HeaterSlotSuggestion; session: HeaterSession } | null>(null)
   const [placeOnHeaterTarget, setPlaceOnHeaterTarget] = useState<HeaterSlotSuggestion | null>(null)
@@ -635,8 +636,28 @@ export default function Dashboard() {
     if (!existing || e.takenAt > existing.takenAt) lastEventByBattery.set(e.batteryId, e)
   }
 
-  // Suppress unused var — kept for future slot-history display
-  void allChargerSessions
+  // Batteries that need charging: not currently on a charger, heater, or in use.
+  // Sorted by most recently returned from use first (just came back → place first).
+  const activeUsageSet = new Set(allUsageEvents.filter((e) => e.returnedAt === null).map((e) => e.batteryId))
+  const chargerSet = new Set(activeSessions.map((s) => s.batteryId))
+  const heaterSet = new Set(activeHeaterSessions.map((s) => s.batteryId))
+  const batteriesNeedingCharge = allBatteries
+    .filter((b) => !chargerSet.has(b.id) && !heaterSet.has(b.id) && !activeUsageSet.has(b.id))
+    .sort((a, b) => {
+      const aLast = lastEventByBattery.get(a.id)
+      const bLast = lastEventByBattery.get(b.id)
+      if (!aLast && !bLast) return 0
+      if (!aLast) return 1   // prefer batteries that have been used (just returned)
+      if (!bLast) return -1
+      return bLast.takenAt - aLast.takenAt  // most recently used first
+    })
+
+  // Assign suggestions to empty slots in order
+  const emptySlots = Array.from({ length: TOTAL_SLOTS }, (_, i) => i + 1).filter((s) => !sessionBySlot[s])
+  const suggestedBatteryBySlot = new Map<number, string>()
+  batteriesNeedingCharge.forEach((b, idx) => {
+    if (idx < emptySlots.length) suggestedBatteryBySlot.set(emptySlots[idx], b.id)
+  })
 
   return (
     <div className="stack">
@@ -750,12 +771,18 @@ export default function Dashboard() {
                   )
                 }
 
+                const suggestedId = suggestedBatteryBySlot.get(slot)
                 return (
                   <div key={slot} className="bay-card bay-card--empty" onClick={() => setSelectedSlot(slot)}>
                     <div className="bay-card__header">
                       <span className="bay-card__slot">{slot}</span>
-                      <span style={{ fontSize: '1.1rem', color: 'var(--color-text-muted)' }}>+</span>
+                      {suggestedId
+                        ? <span className="bay-card__battery-id" style={{ opacity: 0.5 }}>{suggestedId}</span>
+                        : <span style={{ fontSize: '1.1rem', color: 'var(--color-text-muted)' }}>+</span>}
                     </div>
+                    {suggestedId && (
+                      <div className="bay-card__detail" style={{ marginTop: '0.2rem' }}>Tap to place</div>
+                    )}
                   </div>
                 )
               })}
@@ -788,6 +815,7 @@ export default function Dashboard() {
           lastUsageEvent={sessionBySlot[selectedSlot] ? lastEventByBattery.get(sessionBySlot[selectedSlot].batteryId) : undefined}
           availableHeaterSlot={availableHeaterSlot}
           nextMatchNumber={nextMatch?.matchNumber ?? null}
+          defaultBatteryId={sessionBySlot[selectedSlot] ? undefined : suggestedBatteryBySlot.get(selectedSlot)}
           onMoveToHeater={() => {
             const session = sessionBySlot[selectedSlot]
             if (session) { setMoveToHeaterSession(session); setSelectedSlot(null) }
