@@ -231,6 +231,10 @@ export default function Settings() {
             <label>Walk + queue time (min)</label>
             <input type="number" min={1} max={120} {...field('walkAndQueueMinutes')} />
           </div>
+          <div className="form-group">
+            <label>Heater slots</label>
+            <input type="number" min={1} max={6} step={1} {...field('heaterSlotCount')} />
+          </div>
         </div>
       </div>
 

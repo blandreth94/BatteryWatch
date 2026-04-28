@@ -36,6 +36,7 @@ function selectHeaterCandidates(
   statuses: BatteryStatus[],
   _lastUsedMap: Map<string, number>,
   now: number,
+  heaterSlotCount: number,
 ): BatteryStatus[] {
   // Batteries are always on a charger, heater, or in use — "pit" is an edge case.
   // Candidates are charger batteries that have been charging >= 1 hour,
@@ -43,7 +44,7 @@ function selectHeaterCandidates(
   return statuses
     .filter((s) => s.location === 'charger' && s.chargerPlacedAt !== undefined && now - s.chargerPlacedAt >= MIN_CHARGE_MS)
     .sort((a, b) => (a.chargerPlacedAt ?? now) - (b.chargerPlacedAt ?? now))
-    .slice(0, 2)
+    .slice(0, heaterSlotCount)
 }
 
 export function computeHeaterSuggestions(
@@ -54,7 +55,10 @@ export function computeHeaterSuggestions(
   settings: AppSettings,
   now: number,
 ): HeaterSlotSuggestion[] {
-  const idle = (slotNumber: 1 | 2): HeaterSlotSuggestion => ({
+  const { heaterSlotCount } = settings
+  const slots = Array.from({ length: heaterSlotCount }, (_, i) => i + 1)
+
+  const idle = (slotNumber: number): HeaterSlotSuggestion => ({
     slotNumber, batteryId: null, action: 'idle',
     minutesUntilPlace: null, minutesWarm: null, placedAt: null,
     forMatchNumber: null, minutesUntilDeadline: null,
@@ -65,14 +69,14 @@ export function computeHeaterSuggestions(
     .sort((a, b) => a.scheduledTime - b.scheduledTime)
 
   const nextMatch = upcoming[0]
-  if (!nextMatch) return [idle(1), idle(2)]
+  if (!nextMatch) return slots.map(idle)
 
-  // Slot 1 warms for the next match, slot 2 warms for the match after that
-  const matchForSlot: [MatchRecord, MatchRecord] = [nextMatch, upcoming[1] ?? nextMatch]
+  // Slot i warms for upcoming match i (clamped to last available match)
+  const matchForSlot = slots.map((_, i) => upcoming[i] ?? upcoming[upcoming.length - 1])
 
-  const candidates = selectHeaterCandidates(statuses, lastUsedMap, now)
+  const candidates = selectHeaterCandidates(statuses, lastUsedMap, now, heaterSlotCount)
 
-  return ([1, 2] as const).map((slot, i): HeaterSlotSuggestion => {
+  return slots.map((slot, i): HeaterSlotSuggestion => {
     const activeSession = activeHeaterSessions.find((s) => s.slotNumber === slot)
     const targetMatch = matchForSlot[i]
 

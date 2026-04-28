@@ -242,6 +242,7 @@ async function _buildRow(table: SyncableTable, syncId: string): Promise<Record<s
         season_year: r.seasonYear,
         heater_warm_minutes: r.heaterWarmMinutes,
         walk_and_queue_minutes: r.walkAndQueueMinutes,
+        heater_slot_count: r.heaterSlotCount,
         tba_api_key: r.tbaApiKey, tba_event_key: r.tbaEventKey,
       }
     }
@@ -338,6 +339,7 @@ async function _applyRealtimeEvent(
         eventName: newRow.event_name, teamNumber: newRow.team_number,
         seasonYear: newRow.season_year, heaterWarmMinutes: newRow.heater_warm_minutes,
         walkAndQueueMinutes: newRow.walk_and_queue_minutes,
+        heaterSlotCount: newRow.heater_slot_count ?? DEFAULT_SETTINGS.heaterSlotCount,
         tbaApiKey: newRow.tba_api_key, tbaEventKey: newRow.tba_event_key,
       } as AppSettings)
       break
@@ -385,6 +387,7 @@ export async function pullFromSupabase(): Promise<void> {
           eventName: r.event_name, teamNumber: r.team_number,
           seasonYear: r.season_year, heaterWarmMinutes: r.heater_warm_minutes,
           walkAndQueueMinutes: r.walk_and_queue_minutes,
+          heaterSlotCount: r.heater_slot_count ?? DEFAULT_SETTINGS.heaterSlotCount,
           tbaApiKey: r.tba_api_key, tbaEventKey: r.tba_event_key,
         } as AppSettings)
       }

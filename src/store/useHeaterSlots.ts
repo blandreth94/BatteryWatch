@@ -18,7 +18,7 @@ export function useHeaterSessionHistory(batteryId: string): HeaterSession[] {
 
 export async function placeOnHeater(
   batteryId: string,
-  slotNumber: 1 | 2,
+  slotNumber: number,
   forMatchNumber: number | null,
   movedBy?: string,
 ): Promise<{ ok: boolean; error?: string }> {

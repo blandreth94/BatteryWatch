@@ -249,7 +249,7 @@ function HeaterSlotCard({ suggestion, activeSession, heaterWarmMinutes, nextMatc
 
 interface MoveToHeaterModalProps {
   session: ChargerSession
-  targetSlot: 1 | 2
+  targetSlot: number
   nextMatchNumber: number | null
   onClose: () => void
 }
@@ -404,7 +404,7 @@ interface ChargerSlotModalProps {
   slotNumber: number
   existingSession: ChargerSession | null
   lastUsageEvent: BatteryUsageEvent | undefined
-  availableHeaterSlot: 1 | 2 | null
+  availableHeaterSlot: number | null
   nextMatchNumber: number | null
   defaultBatteryId?: string
   onMoveToHeater: () => void
@@ -622,7 +622,8 @@ export default function Dashboard() {
   const [removeFromHeaterTarget, setRemoveFromHeaterTarget] = useState<HeaterSession | null>(null)
 
   const occupiedHeaterSlots = new Set(activeHeaterSessions.map((s) => s.slotNumber))
-  const availableHeaterSlot = ([1, 2] as (1 | 2)[]).find((s) => !occupiedHeaterSlots.has(s)) ?? null
+  const heaterSlotNums = Array.from({ length: settings.heaterSlotCount }, (_, i) => i + 1)
+  const availableHeaterSlot = heaterSlotNums.find((s) => !occupiedHeaterSlots.has(s)) ?? null
 
   const nextMatch = upcomingMatches[0]
   const topSuggestion = matchSuggestions[0]
@@ -701,7 +702,7 @@ export default function Dashboard() {
       {/* Heater slots */}
       <div>
         <div className="section-header"><h2>Heater Slots</h2></div>
-        <div className="grid-2">
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${settings.heaterSlotCount}, 1fr)`, gap: '0.75rem' }}>
           {heaterSuggestions.map((s) => {
             const activeSession = activeHeaterSessions.find((h) => h.slotNumber === s.slotNumber) ?? null
             return (

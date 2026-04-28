@@ -103,6 +103,7 @@ create table if not exists app_settings (
   season_year            integer not null,
   heater_warm_minutes    integer not null default 30,
   walk_and_queue_minutes integer not null default 20,
+  heater_slot_count      integer not null default 2,
   tba_api_key            text not null default '',
   tba_event_key          text not null default ''
 );

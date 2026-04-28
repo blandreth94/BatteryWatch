@@ -25,7 +25,7 @@ export interface HeaterSession {
   id?: number;
   syncId?: string;
   batteryId: string;
-  slotNumber: 1 | 2;              // two heater slots
+  slotNumber: number;
   placedAt: number;
   removedAt: number | null;       // null = currently on heater
   forMatchNumber: number | null;
@@ -68,6 +68,7 @@ export interface AppSettings {
   seasonYear: number;
   heaterWarmMinutes: number;     // default 30
   walkAndQueueMinutes: number;   // lead time, default 20
+  heaterSlotCount: number;       // default 2
   tbaApiKey: string;
   tbaEventKey: string;
 }
@@ -79,6 +80,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   seasonYear: new Date().getFullYear(),
   heaterWarmMinutes: 30,
   walkAndQueueMinutes: 20,
+  heaterSlotCount: 2,
   tbaApiKey: '',
   tbaEventKey: '',
 }
@@ -100,12 +102,12 @@ export interface BatteryStatus {
   location: BatteryLocation
   chargerSlot?: number
   chargerPlacedAt?: number   // Unix ms when placed on current charger session
-  heaterSlot?: 1 | 2
+  heaterSlot?: number
   heaterPlacedAt?: number
 }
 
 export interface HeaterSlotSuggestion {
-  slotNumber: 1 | 2
+  slotNumber: number
   batteryId: string | null
   action: 'place_now' | 'place_in' | 'ready' | 'occupied_not_ready' | 'idle'
   minutesUntilPlace: number | null
