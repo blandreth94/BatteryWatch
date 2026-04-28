@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useSettings, saveSettings } from '../store/useSettings'
-import { useSyncStatus, isCloudMode, isCloudModeLocked, setStorageMode, flushSync, pushToCloud, pullFromSupabase, isSupabaseConfigured } from '../store/useSync'
+import { useSyncStatus, isCloudMode, isCloudModeLocked, setStorageMode, flushSync, pushAllLocalToCloud, pullFromSupabase, isSupabaseConfigured } from '../store/useSync'
 import { db } from '../db/schema'
 import { ENV_TBA_API_KEY, ENV_TBA_EVENT_KEY, ENV_EVENT_NAME, ENV_TEAM_NUMBER } from '../env'
 import type { AppSettings } from '../types'
@@ -125,8 +125,8 @@ export default function Settings() {
     setPushing(true)
     setPushMessage('')
     try {
-      const hadPending = await pushToCloud()
-      setPushMessage(hadPending ? '✅ Pushed to cloud' : '✅ Already up to date')
+      await pushAllLocalToCloud()
+      setPushMessage('✅ Pushed to cloud')
     } catch (e) {
       setPushMessage(`❌ ${e instanceof Error ? e.message : 'Push failed'}`)
     }

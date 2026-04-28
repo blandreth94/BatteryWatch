@@ -97,6 +97,27 @@ export async function pushToCloud(): Promise<boolean> {
   return true
 }
 
+// Re-enqueues every local record and flushes. Use this as a "repair sync"
+// operation when records were created before cloud sync was configured, or to
+// recover from a partial push. Safe to call multiple times — enqueueSync
+// deduplicates by (table, syncId).
+export async function pushAllLocalToCloud(): Promise<void> {
+  if (!isCloudMode()) return
+  const batteries = await db.batteries.toArray()
+  for (const b of batteries) await enqueueSync('batteries', b.id)
+  const cs = await db.chargerSessions.toArray()
+  for (const s of cs) if (s.syncId) await enqueueSync('chargerSessions', s.syncId)
+  const hs = await db.heaterSessions.toArray()
+  for (const s of hs) if (s.syncId) await enqueueSync('heaterSessions', s.syncId)
+  const ue = await db.usageEvents.toArray()
+  for (const e of ue) if (e.syncId) await enqueueSync('usageEvents', e.syncId)
+  const mr = await db.matchRecords.toArray()
+  for (const r of mr) if (r.syncId) await enqueueSync('matchRecords', r.syncId)
+  const settings = await db.settings.get('settings')
+  if (settings) await enqueueSync('settings', String(settings.teamNumber))
+  await _doFlush()
+}
+
 async function _doFlush(): Promise<void> {
   if (!navigator.onLine) return
   const supabase = getSupabase()
@@ -349,17 +370,29 @@ async function _upsertBySyncId(table: any, records: Array<{ syncId?: string }>) 
 export async function initSync(): Promise<void> {
   if (!isCloudMode()) return
 
-  // Auto-pull on first launch (empty local DB) to hydrate from cloud
-  const batteryCount = await db.batteries.count()
-  if (batteryCount === 0) {
-    try { await pullFromSupabase() } catch { /* silent — user can pull manually */ }
-  }
+  // Always pull on startup so every device gets current state immediately,
+  // not just empty ones. Competition devices may have stale local state from
+  // a previous session.
+  try { await pullFromSupabase() } catch { /* silent — user can pull manually */ }
 
   // Flush any operations queued during a previous offline session
   flushSync()
 
   // Reconnect handler
   window.addEventListener('online', () => flushSync())
+
+  // Pull when a PWA comes back to the foreground (phone lock/unlock, app switch)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && isCloudMode()) {
+      pullFromSupabase().catch(() => {})
+    }
+  })
+
+  // Poll every 30 s for always-open displays (TV/PC) so they stay current
+  // without any user action
+  setInterval(() => {
+    if (isCloudMode()) pullFromSupabase().catch(() => {})
+  }, 30_000)
 
   _status = { ..._status, pending: await db.pendingSync.count() }
   _notify()
