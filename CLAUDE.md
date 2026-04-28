@@ -21,6 +21,46 @@ All `npm`/`node` commands must be run inside Docker via OrbStack — never on th
 
 Deploy is automated via `.github/workflows/deploy.yml` on push to `main` — builds and pushes `dist/` to the `gh-pages` branch.
 
+## Critical rules
+
+### Always use `generateId()`, never `crypto.randomUUID()` directly
+
+```typescript
+import { generateId } from '../utils/uuid'
+const id = generateId()
+```
+
+`crypto.randomUUID()` requires a secure context (HTTPS or localhost). The app runs on LAN IPs at competitions (e.g. `192.168.x.x`) which are not secure contexts — calling `randomUUID()` directly will crash. `generateId()` in `src/utils/uuid.ts` falls back to a `Math.random`-based UUID when the native API is unavailable.
+
+### Every mutation must call `enqueueSync` then `flushSync`
+
+```typescript
+import { enqueueSync, flushSync } from '../sync/syncEngine'
+await db.someTable.update(id, changes)
+await enqueueSync('someTable', syncId)
+flushSync()
+```
+
+This keeps the offline queue populated so changes sync to Supabase when online. Skipping these calls means cloud sync silently misses the change.
+
+## Environment variables (`src/env.ts`)
+
+All env vars use the `VITE_` prefix (required by Vite) and are centralised in `src/env.ts`. Import from there — never use `import.meta.env` directly in components.
+
+| Variable | Purpose | Required for |
+|----------|---------|-------------|
+| `VITE_SUPABASE_URL` | Supabase project URL | Cloud sync |
+| `VITE_SUPABASE_ANON_KEY` | Supabase anon/publishable key | Cloud sync |
+| `VITE_STORAGE_MODE` | `"cloud"` or `"local"` — locks the mode | Optional |
+| `VITE_TBA_API_KEY` | The Blue Alliance read key | TBA import |
+| `VITE_TBA_EVENT_KEY` | TBA event key (e.g. `2026vapor`) | TBA import |
+| `VITE_EVENT_NAME` | Bakes event name into the build | Optional |
+| `VITE_TEAM_NUMBER` | Bakes team number into the build | Optional |
+
+Set in `.env.local` for local dev. GitHub Actions secrets/vars are injected via `deploy.yml`.
+
+Fields baked in via env var show an **ENV** badge in Settings and are read-only in the UI.
+
 ## Architecture
 
 ### Data layer — Dexie (IndexedDB)
@@ -54,8 +94,7 @@ When adding, renaming, or removing a field on any persisted TypeScript type:
 Also bump the Dexie version in `src/db/schema.ts` if adding a column that needs to be **indexed** (most optional fields don't need an index and require no Dexie version bump).
 
 #### Supabase column naming convention
-Dexie uses camelCase; Supabase uses snake_case. The mapping is straightforward:
-`batteryId` → `battery_id`, `placedAt` → `placed_at`, `isFullCycle` → `is_full_cycle`, etc.
+Dexie uses camelCase; Supabase uses snake_case: `batteryId` → `battery_id`, `placedAt` → `placed_at`, `isFullCycle` → `is_full_cycle`, etc.
 
 #### Supabase table names
 | Dexie table | Supabase table |
@@ -133,11 +172,97 @@ CSS custom properties only — no CSS framework. Team colors defined in `src/sty
 - `--color-surface`: dark card surface
 - `--color-text`: white
 
-UI is mobile-first with a bottom tab bar. Desktop layout switches at a CSS breakpoint in `src/styles/layout.css`.
+UI is mobile-first with a bottom tab bar. Desktop layout switches at a CSS breakpoint in `src/styles/layout.css`. Component-level styles live in `src/styles/components.css`.
 
 ### PWA
 
 `vite-plugin-pwa` with `GenerateSW` strategy handles the service worker (`skipWaiting: true`, `clientsClaim: true` for immediate activation on update). The `base` in `vite.config.ts` must match the GitHub repo path (`/BatteryWatch/`). Icons at `public/icons/` must include 192px, 512px, and a maskable variant.
+
+## Store API reference
+
+All mutation functions are async and handle `enqueueSync` + `flushSync` internally.
+
+### `src/store/useBatteries.ts`
+- `useBatteries()` — all batteries ordered by id
+- `addBattery(year, label)` — creates battery with id `"${year}${label}"`
+- `updateBattery(id, changes)` — partial update
+- `deleteBattery(id)` — deletes battery and cascades to sessions/match records
+- `incrementCycleCount(batteryId)`
+
+### `src/store/useChargerSlots.ts`
+- `useAllActiveChargerSessions()` — sessions with `removedAt = null`
+- `useChargerSessionHistory(batteryId)`
+- `placeOnCharger(batteryId, slotNumber, voltage, resistance)` — auto-closes usage event; blocks if already on charger or heater
+- `removeFromCharger(session, voltage, isFullCycle)` — increments cycleCount when isFullCycle
+
+### `src/store/useHeaterSlots.ts`
+- `useActiveHeaterSessions()` — sessions with `removedAt = null`
+- `useHeaterSessionHistory(batteryId)`
+- `placeOnHeater(batteryId, slotNumber, forMatchNumber, movedBy?)` — auto-closes charger session; blocks if in use
+- `removeFromHeater(session, removedBy?, voltageAtRemoval?)`
+
+### `src/store/useUsageEvents.ts`
+- `useUsageEvents(batteryId?)` — all events, optionally filtered by battery
+- `useActiveUsageEvents()` — events with `returnedAt = null`
+- `recordUsageEvent(event)` — takes `Omit<BatteryUsageEvent, 'id' | 'syncId'>`
+- `returnBattery(eventId)` — sets `returnedAt`
+- `isBatteryAvailable(batteryId)` — checks all three active states; use for UI validation only
+- `buildLastUsedMap(events)` — returns `Map<batteryId, takenAt>` for suggestion engine
+
+### `src/store/useMatchSchedule.ts`
+- `useMatchSchedule()` — all matches ordered by scheduledTime
+- `useUpcomingMatches()` — status = 'upcoming'
+- `addMatch(matchNumber, scheduledTime)`
+- `assignBatteryToMatch(matchId, batteryId)`
+- `startMatch(matchId)` — sets status to 'active'
+- `completeMatch(matchId)` — sets status to 'complete'
+- `deleteMatch(matchId)`
+- `importFromTBA(eventKey, apiKey, teamNumber)` — fetches qual/playoff matches from TBA API, replaces all upcoming matches
+
+### `src/store/useSettings.ts`
+- `useSettings()` — returns `AppSettings` (with env var overrides applied)
+- `saveSettings(partial)` — partial update, merges with existing
+
+### `src/store/useSync.ts`
+- `useSyncStatus()` — `{ pending, lastSyncedAt, syncing, error }`
+- `pushToCloud()` — direct flush, returns `true` if anything was pushed
+- `pullFromSupabase()` — fetches all data from Supabase and merges into Dexie
+- `isCloudMode()`, `isCloudModeLocked()`, `setStorageMode(mode)`, `isSupabaseConfigured()`
+
+## View responsibilities
+
+### `src/views/Dashboard.tsx` — primary working view
+The most complex file. Contains **all charger and heater interaction modals inlined** (not in separate files):
+- `ChargerSlotModal` — place/remove/take-for-practice from a charger slot; includes "Move to Heater" and "Take for practice" sub-flows
+- `MoveToHeaterModal` — transfer from charger to heater; shows warning if battery charged < 1 hour
+- `RemoveFromHeaterModal` — end-of-day heater removal; shows 30-min cool-down notice after save
+- `TakeForMatchModal` — take a warm heater battery to a match
+- `PlaceOnHeaterModal` — confirm placing a suggested battery on an empty heater slot
+- `HeaterSlotCard` — renders one heater slot with warming progress, action buttons
+- `Dashboard` (default export) — assembles everything; computes charger slot suggestions (batteries needing charge assigned to empty slots in order)
+
+### `src/views/Batteries.tsx`
+Battery list with location status (Charger slot N / Heater N / Out · Match N / Out · Practice / Pit). Tap opens `DetailModal` with full history and edit fields (resistance, notes, delete). `AddModal` for adding new batteries.
+
+### `src/views/MatchSchedule.tsx`
+Match list sorted by scheduled time. Assign a battery to a match, mark active/complete, delete matches. Import matches from The Blue Alliance API (`importFromTBA`).
+
+### `src/views/Settings.tsx`
+Event config (name, team number, season year, TBA keys), storage mode toggle (cloud/local), sync status display, Push/Pull to cloud buttons, "Check for updates" button. Fields locked by env var show an ENV badge and are read-only.
+
+## Components
+
+### `src/components/Modal.tsx`
+Standard bottom-sheet modal (full-width on mobile, centered on desktop). Usage:
+```tsx
+<Modal title="Modal Title" onClose={onClose}>
+  {/* content */}
+</Modal>
+```
+Always import `Modal` from here — do not build custom overlays.
+
+### `src/components/BatteryBadge.tsx`
+Small inline badge for displaying a battery ID. Props: `id: string`, `size?: 'sm' | 'md' | 'lg'`.
 
 ## Key files
 
@@ -147,6 +272,8 @@ UI is mobile-first with a bottom tab bar. Desktop layout switches at a CSS break
 | `src/db/schema.ts` | Dexie database class + versioned migrations |
 | `src/sync/syncEngine.ts` | Cloud sync push/pull logic — update `_buildRow` and `pullFromSupabase` for every field change |
 | `src/engine/suggestions.ts` | Core algorithm — pure functions, fully unit-testable |
+| `src/env.ts` | All env var access — import from here, never use `import.meta.env` directly |
+| `src/utils/uuid.ts` | `generateId()` — always use this instead of `crypto.randomUUID()` |
 | `src/App.tsx` | Router shell, global context, bottom nav |
 | `vite.config.ts` | Build config including `base` path and PWA plugin |
 | `supabase/migrations/` | Supabase SQL migrations — keep in sync with `src/types/index.ts` |
