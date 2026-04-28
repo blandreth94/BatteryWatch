@@ -224,7 +224,7 @@ function HeaterSlotCard({ suggestion, activeSession, heaterWarmMinutes, nextMatc
 
       {!activeSession && !batteryId && (
         <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
-          No upcoming match
+          {forMatchNumber ? 'No eligible batteries available' : 'No upcoming match'}
         </div>
       )}
     </div>

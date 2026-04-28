@@ -34,8 +34,8 @@ function selectHeaterCandidates(
   statuses: BatteryStatus[],
   lastUsedMap: Map<string, number>,
 ): BatteryStatus[] {
-  // Only pit batteries are candidates — heater slots with active sessions are handled separately
-  const eligible = statuses.filter((s) => s.location === 'pit')
+  // Pit AND charger batteries are candidates — anything not already on heater or in-use
+  const eligible = statuses.filter((s) => s.location === 'pit' || s.location === 'charger')
   return eligible
     .slice()
     .sort((a, b) => {
@@ -68,20 +68,25 @@ export function computeHeaterSuggestions(
     forMatchNumber: null, minutesUntilDeadline: null,
   })
 
-  const nextMatch = upcomingMatches
+  const upcoming = upcomingMatches
     .filter((m) => m.status === 'upcoming')
-    .sort((a, b) => a.scheduledTime - b.scheduledTime)[0]
+    .sort((a, b) => a.scheduledTime - b.scheduledTime)
 
+  const nextMatch = upcoming[0]
   if (!nextMatch) return [idle(1), idle(2)]
 
-  const heaterDeadlineMs = nextMatch.scheduledTime - settings.walkAndQueueMinutes * 60_000
-  const targetPlacementMs = heaterDeadlineMs - settings.heaterWarmMinutes * 60_000
-  const minutesUntilDeadline = Math.round((heaterDeadlineMs - now) / 60_000)
+  // Slot 1 warms for the next match, slot 2 warms for the match after that
+  const matchForSlot: [MatchRecord, MatchRecord] = [nextMatch, upcoming[1] ?? nextMatch]
 
   const candidates = selectHeaterCandidates(statuses, lastUsedMap)
 
   return ([1, 2] as const).map((slot, i): HeaterSlotSuggestion => {
     const activeSession = activeHeaterSessions.find((s) => s.slotNumber === slot)
+    const targetMatch = matchForSlot[i]
+
+    const heaterDeadlineMs = targetMatch.scheduledTime - settings.walkAndQueueMinutes * 60_000
+    const targetPlacementMs = heaterDeadlineMs - settings.heaterWarmMinutes * 60_000
+    const minutesUntilDeadline = Math.round((heaterDeadlineMs - now) / 60_000)
 
     if (activeSession) {
       const minutesWarm = Math.floor((now - activeSession.placedAt) / 60_000)
@@ -93,13 +98,19 @@ export function computeHeaterSuggestions(
         minutesUntilPlace: null,
         minutesWarm,
         placedAt: activeSession.placedAt,
-        forMatchNumber: nextMatch.matchNumber,
+        forMatchNumber: activeSession.forMatchNumber ?? targetMatch.matchNumber,
         minutesUntilDeadline,
       }
     }
 
     const candidate = candidates[i]
-    if (!candidate) return { ...idle(slot), forMatchNumber: nextMatch.matchNumber, minutesUntilDeadline }
+    if (!candidate) {
+      return {
+        slotNumber: slot, batteryId: null, action: 'idle',
+        minutesUntilPlace: null, minutesWarm: null, placedAt: null,
+        forMatchNumber: targetMatch.matchNumber, minutesUntilDeadline,
+      }
+    }
 
     const minutesUntilPlace = Math.round((targetPlacementMs - now) / 60_000)
     return {
@@ -109,7 +120,7 @@ export function computeHeaterSuggestions(
       minutesUntilPlace: minutesUntilPlace > 0 ? minutesUntilPlace : null,
       minutesWarm: null,
       placedAt: null,
-      forMatchNumber: nextMatch.matchNumber,
+      forMatchNumber: targetMatch.matchNumber,
       minutesUntilDeadline,
     }
   })
