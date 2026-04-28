@@ -39,6 +39,9 @@ jobs:
           VITE_TBA_EVENT_KEY: ${{ vars.VITE_TBA_EVENT_KEY }}
           VITE_EVENT_NAME: ${{ vars.VITE_EVENT_NAME }}
           VITE_TEAM_NUMBER: ${{ vars.VITE_TEAM_NUMBER }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_STORAGE_MODE: ${{ vars.VITE_STORAGE_MODE }}
 
       - uses: actions/upload-pages-artifact@v3
         with:
