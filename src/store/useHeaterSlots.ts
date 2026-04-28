@@ -1,6 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/schema'
-import { isBatteryAvailable } from './useUsageEvents'
 import { enqueueSync, flushSync } from '../sync/syncEngine'
 import { generateId } from '../utils/uuid'
 import type { HeaterSession } from '../types'
@@ -23,8 +22,25 @@ export async function placeOnHeater(
   forMatchNumber: number | null,
   movedBy?: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const availability = await isBatteryAvailable(batteryId)
-  if (!availability.available) return { ok: false, error: availability.reason }
+  // Block if already on heater or currently in use — but NOT if on charger.
+  // Placing on heater implicitly removes from charger (same pattern as
+  // placeOnCharger auto-closing open usage events).
+  const [onHeater, inUse] = await Promise.all([
+    db.heaterSessions.where('batteryId').equals(batteryId).toArray()
+      .then((rows) => rows.find((r) => r.removedAt === null)),
+    db.usageEvents.where('batteryId').equals(batteryId).toArray()
+      .then((rows) => rows.find((r) => r.returnedAt === null)),
+  ])
+  if (onHeater) return { ok: false, error: `${batteryId} is already on heater ${onHeater.slotNumber}` }
+  if (inUse) return { ok: false, error: `${batteryId} is currently ${inUse.eventType === 'match' ? `in match ${inUse.matchNumber}` : 'at practice field'}` }
+
+  // Auto-close any active charger session
+  const onCharger = await db.chargerSessions.where('batteryId').equals(batteryId).toArray()
+    .then((rows) => rows.find((r) => r.removedAt === null))
+  if (onCharger?.id !== undefined) {
+    await db.chargerSessions.update(onCharger.id, { removedAt: Date.now() })
+    if (onCharger.syncId) await enqueueSync('chargerSessions', onCharger.syncId)
+  }
 
   // Close existing session in this slot if any
   const existing = await db.heaterSessions.where('slotNumber').equals(slotNumber).toArray()
