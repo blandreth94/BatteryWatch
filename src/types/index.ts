@@ -29,7 +29,9 @@ export interface HeaterSession {
   placedAt: number;
   removedAt: number | null;       // null = currently on heater
   forMatchNumber: number | null;
-  movedBy?: string;               // person who moved battery to heater
+  movedBy?: string;               // person who placed battery on heater
+  removedBy?: string;             // person who removed battery (non-match removal)
+  voltageAtRemoval?: number | null;
 }
 
 // Tracks every time a battery leaves the pit (match or practice field).

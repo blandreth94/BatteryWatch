@@ -153,9 +153,10 @@ interface HeaterSlotCardProps {
   now: number
   onTakeForMatch: () => void
   onPlaceConfirm: () => void
+  onRemove: () => void
 }
 
-function HeaterSlotCard({ suggestion, activeSession, heaterWarmMinutes, nextMatchId: _nextMatchId, now, onTakeForMatch, onPlaceConfirm }: HeaterSlotCardProps) {
+function HeaterSlotCard({ suggestion, activeSession, heaterWarmMinutes, nextMatchId: _nextMatchId, now, onTakeForMatch, onPlaceConfirm, onRemove }: HeaterSlotCardProps) {
   let cardClass = 'heater-card'
   const { action, batteryId, minutesWarm, placedAt, minutesUntilPlace, forMatchNumber } = suggestion
 
@@ -204,6 +205,13 @@ function HeaterSlotCard({ suggestion, activeSession, heaterWarmMinutes, nextMatc
               Take anyway
             </button>
           )}
+          <button
+            className="btn-ghost"
+            style={{ marginTop: '0.35rem', width: '100%', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}
+            onClick={onRemove}
+          >
+            Remove (not for match)
+          </button>
         </>
       )}
 
@@ -244,8 +252,12 @@ function MoveToHeaterModal({ session, targetSlot, nextMatchNumber, onClose }: Mo
   const [voltage, setVoltage] = useState('')
   const [resistance, setResistance] = useState('')
   const [movedBy, setMovedBy] = useState('')
+  const [acknowledged, setAcknowledged] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+
+  const chargeMinutes = Math.floor((Date.now() - session.placedAt) / 60_000)
+  const underCharged = chargeMinutes < 60
 
   async function handleConfirm() {
     if (!movedBy.trim()) { setError('Please enter who is moving the battery.'); return }
@@ -269,11 +281,27 @@ function MoveToHeaterModal({ session, targetSlot, nextMatchNumber, onClose }: Mo
         Remove from charger and place on heater {targetSlot}
         {nextMatchNumber ? ` for Match ${nextMatchNumber}` : ''}.
       </p>
+
+      {underCharged && (
+        <div style={{ background: 'rgba(224,82,82,0.12)', border: '1px solid var(--color-danger)', borderRadius: 'var(--radius-sm)', padding: '0.6rem 0.75rem', marginBottom: '0.9rem' }}>
+          <div style={{ fontSize: '0.85rem', color: 'var(--color-danger)', fontWeight: 600, marginBottom: '0.35rem' }}>
+            ⚠️ Only charged for {chargeMinutes} min — may not be fully charged
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <input type="checkbox" id="ack" checked={acknowledged}
+              onChange={(e) => setAcknowledged(e.target.checked)} style={{ width: 'auto' }} />
+            <label htmlFor="ack" style={{ margin: 0, textTransform: 'none', fontSize: '0.85rem', color: 'var(--color-danger)' }}>
+              I understand, move it anyway
+            </label>
+          </div>
+        </div>
+      )}
+
       <div className="form-row">
         <div className="form-group">
           <label>Voltage V0</label>
           <input type="number" step="0.01" placeholder="e.g. 12.6" value={voltage}
-            onChange={(e) => setVoltage(e.target.value)} autoFocus />
+            onChange={(e) => setVoltage(e.target.value)} autoFocus={!underCharged} />
         </div>
         <div className="form-group">
           <label>Resistance (Ω)</label>
@@ -288,8 +316,75 @@ function MoveToHeaterModal({ session, targetSlot, nextMatchNumber, onClose }: Mo
       </div>
       {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{error}</p>}
       <div className="row">
-        <button className="btn-primary" style={{ flex: 1 }} onClick={handleConfirm} disabled={submitting}>
+        <button className="btn-primary" style={{ flex: 1 }} onClick={handleConfirm}
+          disabled={submitting || (underCharged && !acknowledged)}>
           {submitting ? 'Moving…' : 'Confirm — move to heater'}
+        </button>
+        <button className="btn-ghost" onClick={onClose}>Cancel</button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── Remove from Heater modal (non-match) ──────────────────────────────────────
+
+interface RemoveFromHeaterModalProps {
+  session: HeaterSession
+  onClose: () => void
+}
+
+function RemoveFromHeaterModal({ session, onClose }: RemoveFromHeaterModalProps) {
+  const [voltage, setVoltage] = useState('')
+  const [removedBy, setRemovedBy] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [done, setDone] = useState(false)
+
+  async function handleConfirm() {
+    if (!removedBy.trim()) { setError('Please enter who is removing the battery.'); return }
+    setSubmitting(true)
+    await removeFromHeater(session, removedBy.trim(), voltage ? parseFloat(voltage) : null)
+    setDone(true)
+    setSubmitting(false)
+  }
+
+  if (done) {
+    return (
+      <Modal title="Battery Removed" onClose={onClose}>
+        <div style={{ textAlign: 'center', padding: '0.5rem 0 1rem' }}>
+          <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🌡️</div>
+          <div style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '0.4rem' }}>
+            {session.batteryId} removed from heater
+          </div>
+          <div style={{ background: 'rgba(224,82,82,0.12)', border: '1px solid var(--color-danger)', borderRadius: 'var(--radius-sm)', padding: '0.75rem', fontSize: '0.9rem', color: 'var(--color-danger)', marginBottom: '1.25rem' }}>
+            Allow <strong>30 minutes to cool</strong> before placing on charger
+          </div>
+          <button className="btn-primary" style={{ width: '100%' }} onClick={onClose}>Got it</button>
+        </div>
+      </Modal>
+    )
+  }
+
+  return (
+    <Modal title={`Remove ${session.batteryId} from Heater ${session.slotNumber}`} onClose={onClose}>
+      <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
+        End-of-day removal or early pull. Battery will need 30 min to cool before charging.
+      </p>
+      <div className="form-group">
+        <label>Voltage (optional)</label>
+        <input type="number" step="0.01" placeholder="e.g. 12.6" value={voltage}
+          onChange={(e) => setVoltage(e.target.value)} autoFocus />
+      </div>
+      <div className="form-group">
+        <label>Removed by</label>
+        <input type="text" placeholder="Name or initials" value={removedBy}
+          onChange={(e) => setRemovedBy(e.target.value)} />
+      </div>
+      {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{error}</p>}
+      <div className="row">
+        <button className="btn-primary" style={{ flex: 1 }} onClick={handleConfirm}
+          disabled={!removedBy.trim() || submitting}>
+          {submitting ? 'Saving…' : 'Remove from heater'}
         </button>
         <button className="btn-ghost" onClick={onClose}>Cancel</button>
       </div>
@@ -517,6 +612,7 @@ export default function Dashboard() {
   const [placeOnHeaterTarget, setPlaceOnHeaterTarget] = useState<HeaterSlotSuggestion | null>(null)
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null)
   const [moveToHeaterSession, setMoveToHeaterSession] = useState<ChargerSession | null>(null)
+  const [removeFromHeaterTarget, setRemoveFromHeaterTarget] = useState<HeaterSession | null>(null)
 
   const occupiedHeaterSlots = new Set(activeHeaterSessions.map((s) => s.slotNumber))
   const availableHeaterSlot = ([1, 2] as (1 | 2)[]).find((s) => !occupiedHeaterSlots.has(s)) ?? null
@@ -585,6 +681,7 @@ export default function Dashboard() {
                 now={now}
                 onTakeForMatch={() => activeSession && setTakeForMatchTarget({ suggestion: s, session: activeSession })}
                 onPlaceConfirm={() => setPlaceOnHeaterTarget(s)}
+                onRemove={() => activeSession && setRemoveFromHeaterTarget(activeSession)}
               />
             )
           })}
@@ -696,6 +793,12 @@ export default function Dashboard() {
           targetSlot={availableHeaterSlot}
           nextMatchNumber={nextMatch?.matchNumber ?? null}
           onClose={() => setMoveToHeaterSession(null)}
+        />
+      )}
+      {removeFromHeaterTarget !== null && (
+        <RemoveFromHeaterModal
+          session={removeFromHeaterTarget}
+          onClose={() => setRemoveFromHeaterTarget(null)}
         />
       )}
     </div>

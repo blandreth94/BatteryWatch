@@ -46,9 +46,17 @@ export async function placeOnHeater(
   return { ok: true }
 }
 
-export async function removeFromHeater(session: HeaterSession): Promise<void> {
+export async function removeFromHeater(
+  session: HeaterSession,
+  removedBy?: string,
+  voltageAtRemoval?: number | null,
+): Promise<void> {
   if (session.id === undefined) return
-  await db.heaterSessions.update(session.id, { removedAt: Date.now() })
+  await db.heaterSessions.update(session.id, {
+    removedAt: Date.now(),
+    ...(removedBy ? { removedBy } : {}),
+    ...(voltageAtRemoval !== undefined ? { voltageAtRemoval } : {}),
+  })
   if (session.syncId) await enqueueSync('heaterSessions', session.syncId)
   flushSync()
 }
