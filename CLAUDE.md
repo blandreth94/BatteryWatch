@@ -67,6 +67,48 @@ Dexie uses camelCase; Supabase uses snake_case. The mapping is straightforward:
 | `matchRecords` | `match_records` |
 | `settings` | `app_settings` |
 
+### Battery lifecycle and state transitions
+
+A battery is always in exactly one of these states, determined by which table has an active (open) record for it:
+
+| State | Active record | `null` sentinel |
+|-------|--------------|-----------------|
+| **Charging** | `chargerSessions` row with `removedAt = null` | — |
+| **Heating** | `heaterSessions` row with `removedAt = null` | — |
+| **In use** | `usageEvents` row with `returnedAt = null` | — |
+| **Pit** | none of the above | edge case — newly added batteries only |
+
+#### Valid transitions and how each is implemented
+
+```
+Charging → Heating   placeOnHeater()    AUTO-closes the charger session
+Charging → In use    recordUsageEvent() requires explicit removeFromCharger() first (done in ChargerSlotModal)
+Charging → Charging  placeOnCharger()   BLOCKED — must remove from charger first
+Heating  → In use    recordUsageEvent() requires explicit removeFromHeater() first (done in TakeForMatchModal)
+Heating  → Charging  placeOnCharger()   BLOCKED intentionally — user must call removeFromHeater()
+                                        first so the 30-min cool-down warning is shown
+Heating  → Pit       removeFromHeater() explicit; shows 30-min cool-down notice
+In use   → Charging  placeOnCharger()   AUTO-closes the usage event and completes the match record
+In use   → Heating   BLOCKED            a battery in a match cannot be placed on a heater
+```
+
+#### The rule for implementing any new transition
+
+> **Implicit removal** (auto-close) is appropriate when the transition is routine and no data needs to be recorded for the old session. Use it so the UI never shows a spurious "battery is already on X" error for an expected flow.
+>
+> **Explicit removal** (require caller to call the remove function first) is appropriate when the transition needs to prompt the user for data (voltage, who removed it) or show a warning (the 30-min cool-down).
+
+When adding a new placement function, ask for each active-record type:
+- Can this battery arrive here *from* a charger without stopping? → auto-close charger session
+- Can this battery arrive here *from* a heater without stopping? → auto-close heater session (or block + force explicit removal if a warning/data-collection step is needed)
+- Can this battery arrive here while *in use*? → almost always block
+
+#### Key side-effects that must not be missed
+
+- `placeOnCharger` completing a match: when it auto-closes a match-type usage event it also sets the matching `matchRecords` row to `status: 'complete'`.
+- `removeFromCharger` with `isFullCycle: true` increments `battery.cycleCount`.
+- `isBatteryAvailable()` in `useUsageEvents.ts` is a utility that checks all three active-record types — useful for UI validation but **not used by placement functions** (they each encode their own transition-specific logic).
+
 ### Reactivity
 
 **`dexie-react-hooks` `useLiveQuery`** is the reactivity model — components re-render automatically when IndexedDB data changes. There is no Redux, Zustand, or other state library. Store hooks live in `src/store/` and expose `useLiveQuery` results alongside Dexie mutation helpers.
