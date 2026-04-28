@@ -5,7 +5,7 @@ import {
   type SyncStatus,
 } from '../sync/syncEngine'
 
-export { isCloudMode, isCloudModeLocked, setStorageMode, flushSync, pullFromSupabase } from '../sync/syncEngine'
+export { isCloudMode, isCloudModeLocked, setStorageMode, flushSync, pushToCloud, pullFromSupabase } from '../sync/syncEngine'
 export { isSupabaseConfigured } from '../sync/supabaseClient'
 
 export function useSyncStatus(): SyncStatus {

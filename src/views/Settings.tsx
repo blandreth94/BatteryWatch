@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useSettings, saveSettings } from '../store/useSettings'
-import { useSyncStatus, isCloudMode, isCloudModeLocked, setStorageMode, flushSync, pullFromSupabase, isSupabaseConfigured } from '../store/useSync'
+import { useSyncStatus, isCloudMode, isCloudModeLocked, setStorageMode, flushSync, pushToCloud, pullFromSupabase, isSupabaseConfigured } from '../store/useSync'
 import { db } from '../db/schema'
 import { ENV_TBA_API_KEY, ENV_TBA_EVENT_KEY, ENV_EVENT_NAME, ENV_TEAM_NUMBER } from '../env'
 import type { AppSettings } from '../types'
@@ -41,6 +41,9 @@ export default function Settings() {
   const [confirmClear, setConfirmClear] = useState(false)
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'upToDate'>('idle')
   const [cloudEnabled, setCloudEnabled] = useState(isCloudMode)
+  const [pushing, setPushing] = useState(false)
+  const [pushMessage, setPushMessage] = useState('')
+  const [confirmPull, setConfirmPull] = useState(false)
   const [pulling, setPulling] = useState(false)
   const [pullMessage, setPullMessage] = useState('')
   const syncStatus = useSyncStatus()
@@ -118,8 +121,22 @@ export default function Settings() {
     if (next) flushSync()
   }
 
+  async function handlePushToCloud() {
+    setPushing(true)
+    setPushMessage('')
+    try {
+      const hadPending = await pushToCloud()
+      setPushMessage(hadPending ? '✅ Pushed to cloud' : '✅ Already up to date')
+    } catch (e) {
+      setPushMessage(`❌ ${e instanceof Error ? e.message : 'Push failed'}`)
+    }
+    setPushing(false)
+    setTimeout(() => setPushMessage(''), 3000)
+  }
+
   async function handlePullFromCloud() {
     setPulling(true)
+    setConfirmPull(false)
     setPullMessage('')
     try {
       await pullFromSupabase()
@@ -282,13 +299,27 @@ export default function Settings() {
                   {syncStatus.pending > 0 && ` · ${syncStatus.pending} upload${syncStatus.pending !== 1 ? 's' : ''} pending`}
                 </p>
                 <div className="row" style={{ gap: '0.5rem' }}>
-                  <button className="btn-ghost" style={{ flex: 1, fontSize: '0.82rem' }} onClick={() => flushSync()}>
-                    Push to cloud
+                  <button className="btn-ghost" style={{ flex: 1, fontSize: '0.82rem' }} onClick={handlePushToCloud} disabled={pushing}>
+                    {pushing ? 'Pushing…' : 'Push to cloud'}
                   </button>
-                  <button className="btn-ghost" style={{ flex: 1, fontSize: '0.82rem' }} onClick={handlePullFromCloud} disabled={pulling}>
-                    {pulling ? 'Pulling…' : 'Pull from cloud'}
+                  <button className="btn-ghost" style={{ flex: 1, fontSize: '0.82rem' }} onClick={() => setConfirmPull(true)} disabled={pulling || confirmPull}>
+                    Pull from cloud
                   </button>
                 </div>
+                {pushMessage && <p style={{ fontSize: '0.82rem' }}>{pushMessage}</p>}
+                {confirmPull && (
+                  <div style={{ background: 'rgba(224,82,82,0.1)', border: '1px solid var(--color-danger)', borderRadius: 'var(--radius-sm)', padding: '0.6rem 0.75rem' }}>
+                    <p style={{ fontSize: '0.82rem', marginBottom: '0.5rem' }}>
+                      This will merge cloud data into your local database, overwriting any conflicting local changes. Continue?
+                    </p>
+                    <div className="row" style={{ gap: '0.5rem' }}>
+                      <button className="btn-danger" style={{ fontSize: '0.82rem' }} onClick={handlePullFromCloud} disabled={pulling}>
+                        {pulling ? 'Pulling…' : 'Yes, pull from cloud'}
+                      </button>
+                      <button className="btn-ghost" style={{ fontSize: '0.82rem' }} onClick={() => setConfirmPull(false)}>Cancel</button>
+                    </div>
+                  </div>
+                )}
                 {pullMessage && <p style={{ fontSize: '0.82rem' }}>{pullMessage}</p>}
               </div>
             )}

@@ -88,6 +88,15 @@ export function flushSync(): void {
   }, 500)
 }
 
+// Direct flush for the manual "Push to cloud" button — skips debounce.
+// Returns true if anything was pushed, false if queue was already empty.
+export async function pushToCloud(): Promise<boolean> {
+  const pending = await db.pendingSync.count()
+  if (pending === 0) return false
+  await _doFlush()
+  return true
+}
+
 async function _doFlush(): Promise<void> {
   if (!navigator.onLine) return
   const supabase = getSupabase()
