@@ -86,7 +86,7 @@ function TakeForMatchModal({ batteryId, fromSession, matchNumber, matchId, onClo
             onChange={(e) => setVoltage(e.target.value)} autoFocus />
         </div>
         <div className="form-group">
-          <label>Resistance (mΩ)</label>
+          <label>Resistance (Ω)</label>
           <input type="number" step="0.1" placeholder="e.g. 120" value={resistance}
             onChange={(e) => setResistance(e.target.value)} />
         </div>
@@ -312,7 +312,7 @@ function ChargerSlotModal({ slotNumber, existingSession, lastUsageEvent, onClose
             {existingSession.voltageAtPlacement !== null && (
               <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
                 V0: {existingSession.voltageAtPlacement}V
-                {existingSession.resistanceAtPlacement !== null && ` · ${existingSession.resistanceAtPlacement}mΩ`}
+                {existingSession.resistanceAtPlacement !== null && ` · ${existingSession.resistanceAtPlacement}Ω`}
               </div>
             )}
             {lastUsageEvent && (
@@ -356,7 +356,7 @@ function ChargerSlotModal({ slotNumber, existingSession, lastUsageEvent, onClose
                     onChange={(e) => setPracticeVoltage(e.target.value)} autoFocus />
                 </div>
                 <div className="form-group">
-                  <label>Resistance (mΩ)</label>
+                  <label>Resistance (Ω)</label>
                   <input type="number" step="0.1" placeholder="e.g. 120" value={practiceResistance}
                     onChange={(e) => setPracticeResistance(e.target.value)} />
                 </div>
@@ -392,7 +392,7 @@ function ChargerSlotModal({ slotNumber, existingSession, lastUsageEvent, onClose
                 onChange={(e) => setVoltage(e.target.value)} />
             </div>
             <div className="form-group">
-              <label>Resistance (mΩ)</label>
+              <label>Resistance (Ω)</label>
               <input type="number" step="0.1" placeholder="e.g. 120" value={resistance}
                 onChange={(e) => setResistance(e.target.value)} />
             </div>
@@ -528,10 +528,10 @@ export default function Dashboard() {
                         <span className="bay-card__slot">{slot}</span>
                         <span className="bay-card__battery-id">{session.batteryId}</span>
                       </div>
-                      <div className="bay-card__detail">{formatDuration(elapsed)}</div>
-                      {session.voltageAtPlacement !== null && (
-                        <div className="bay-card__detail">V0: {session.voltageAtPlacement}V</div>
-                      )}
+                      <div className="bay-card__header">
+                        <span className="bay-card__detail">Since {formatTime(session.placedAt)}</span>
+                        <span className="bay-card__detail">{formatDuration(elapsed)}</span>
+                      </div>
                       {lastEvent && (
                         <div className="bay-card__time">{lastUsageLabel(lastEvent)}</div>
                       )}
