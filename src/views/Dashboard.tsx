@@ -231,16 +231,85 @@ function HeaterSlotCard({ suggestion, activeSession, heaterWarmMinutes, nextMatc
   )
 }
 
+// ── Move to Heater modal ──────────────────────────────────────────────────────
+
+interface MoveToHeaterModalProps {
+  session: ChargerSession
+  targetSlot: 1 | 2
+  nextMatchNumber: number | null
+  onClose: () => void
+}
+
+function MoveToHeaterModal({ session, targetSlot, nextMatchNumber, onClose }: MoveToHeaterModalProps) {
+  const [voltage, setVoltage] = useState('')
+  const [resistance, setResistance] = useState('')
+  const [movedBy, setMovedBy] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleConfirm() {
+    if (!movedBy.trim()) { setError('Please enter who is moving the battery.'); return }
+    setSubmitting(true)
+    try {
+      await removeFromCharger(session, voltage ? parseFloat(voltage) : null, false)
+      const result = await placeOnHeater(
+        session.batteryId, targetSlot, nextMatchNumber, movedBy.trim(),
+      )
+      if (!result.ok) { setError(result.error ?? 'Could not place on heater.'); setSubmitting(false); return }
+      onClose()
+    } catch {
+      setError('Something went wrong. Please try again.')
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal title={`Move ${session.batteryId} → Heater ${targetSlot}`} onClose={onClose}>
+      <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
+        Remove from charger and place on heater {targetSlot}
+        {nextMatchNumber ? ` for Match ${nextMatchNumber}` : ''}.
+      </p>
+      <div className="form-row">
+        <div className="form-group">
+          <label>Voltage V0</label>
+          <input type="number" step="0.01" placeholder="e.g. 12.6" value={voltage}
+            onChange={(e) => setVoltage(e.target.value)} autoFocus />
+        </div>
+        <div className="form-group">
+          <label>Resistance (Ω)</label>
+          <input type="number" step="0.1" placeholder="e.g. 120" value={resistance}
+            onChange={(e) => setResistance(e.target.value)} />
+        </div>
+      </div>
+      <div className="form-group">
+        <label>Moved by</label>
+        <input type="text" placeholder="Name or initials" value={movedBy}
+          onChange={(e) => setMovedBy(e.target.value)} />
+      </div>
+      {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{error}</p>}
+      <div className="row">
+        <button className="btn-primary" style={{ flex: 1 }} onClick={handleConfirm} disabled={submitting}>
+          {submitting ? 'Moving…' : 'Confirm — move to heater'}
+        </button>
+        <button className="btn-ghost" onClick={onClose}>Cancel</button>
+      </div>
+    </Modal>
+  )
+}
+
 // ── Charger slot modal ────────────────────────────────────────────────────────
 
 interface ChargerSlotModalProps {
   slotNumber: number
   existingSession: ChargerSession | null
   lastUsageEvent: BatteryUsageEvent | undefined
+  availableHeaterSlot: 1 | 2 | null
+  nextMatchNumber: number | null
+  onMoveToHeater: () => void
   onClose: () => void
 }
 
-function ChargerSlotModal({ slotNumber, existingSession, lastUsageEvent, onClose }: ChargerSlotModalProps) {
+function ChargerSlotModal({ slotNumber, existingSession, lastUsageEvent, availableHeaterSlot, nextMatchNumber, onMoveToHeater, onClose }: ChargerSlotModalProps) {
   const batteries = useBatteries()
   const [batteryId, setBatteryId] = useState(existingSession?.batteryId ?? '')
   const [voltage, setVoltage] = useState('')
@@ -345,6 +414,21 @@ function ChargerSlotModal({ slotNumber, existingSession, lastUsageEvent, onClose
               <button className="btn-ghost" style={{ width: '100%', fontSize: '0.85rem' }} onClick={() => setShowPractice(true)}>
                 Take for practice field →
               </button>
+              <button
+                className="btn-ghost"
+                style={{
+                  width: '100%', fontSize: '0.85rem', marginTop: '0.35rem',
+                  color: availableHeaterSlot !== null ? 'var(--color-primary)' : undefined,
+                  borderColor: availableHeaterSlot !== null ? 'var(--color-primary)' : undefined,
+                  opacity: availableHeaterSlot !== null ? 1 : 0.45,
+                }}
+                disabled={availableHeaterSlot === null}
+                onClick={availableHeaterSlot !== null ? onMoveToHeater : undefined}
+              >
+                {availableHeaterSlot !== null
+                  ? `Move to Heater ${availableHeaterSlot}${nextMatchNumber ? ` (Match ${nextMatchNumber})` : ''} →`
+                  : 'Move to Heater (both slots full)'}
+              </button>
             </>
           ) : (
             <>
@@ -432,6 +516,10 @@ export default function Dashboard() {
   const [takeForMatchTarget, setTakeForMatchTarget] = useState<{ suggestion: HeaterSlotSuggestion; session: HeaterSession } | null>(null)
   const [placeOnHeaterTarget, setPlaceOnHeaterTarget] = useState<HeaterSlotSuggestion | null>(null)
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null)
+  const [moveToHeaterSession, setMoveToHeaterSession] = useState<ChargerSession | null>(null)
+
+  const occupiedHeaterSlots = new Set(activeHeaterSessions.map((s) => s.slotNumber))
+  const availableHeaterSlot = ([1, 2] as (1 | 2)[]).find((s) => !occupiedHeaterSlots.has(s)) ?? null
 
   const nextMatch = upcomingMatches[0]
   const topSuggestion = matchSuggestions[0]
@@ -532,9 +620,27 @@ export default function Dashboard() {
                         <span className="bay-card__detail">Since {formatTime(session.placedAt)}</span>
                         <span className="bay-card__detail">{formatDuration(elapsed)}</span>
                       </div>
-                      {lastEvent && (
-                        <div className="bay-card__time">{lastUsageLabel(lastEvent)}</div>
-                      )}
+                      <div className="bay-card__header" style={{ marginTop: 'auto' }}>
+                        {lastEvent
+                          ? <span className="bay-card__time" style={{ marginTop: 0 }}>{lastUsageLabel(lastEvent)}</span>
+                          : <span />}
+                        <button
+                          className="btn-ghost"
+                          style={{
+                            fontSize: '0.7rem', padding: '0.15rem 0.4rem', lineHeight: 1.2,
+                            color: availableHeaterSlot !== null ? 'var(--color-primary)' : undefined,
+                            borderColor: availableHeaterSlot !== null ? 'var(--color-primary)' : undefined,
+                            opacity: availableHeaterSlot !== null ? 1 : 0.4,
+                          }}
+                          disabled={availableHeaterSlot === null}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (availableHeaterSlot !== null) setMoveToHeaterSession(session)
+                          }}
+                        >
+                          → Heater
+                        </button>
+                      </div>
                     </div>
                   )
                 }
@@ -575,7 +681,21 @@ export default function Dashboard() {
           slotNumber={selectedSlot}
           existingSession={sessionBySlot[selectedSlot] ?? null}
           lastUsageEvent={sessionBySlot[selectedSlot] ? lastEventByBattery.get(sessionBySlot[selectedSlot].batteryId) : undefined}
+          availableHeaterSlot={availableHeaterSlot}
+          nextMatchNumber={nextMatch?.matchNumber ?? null}
+          onMoveToHeater={() => {
+            const session = sessionBySlot[selectedSlot]
+            if (session) { setMoveToHeaterSession(session); setSelectedSlot(null) }
+          }}
           onClose={() => setSelectedSlot(null)}
+        />
+      )}
+      {moveToHeaterSession !== null && availableHeaterSlot !== null && (
+        <MoveToHeaterModal
+          session={moveToHeaterSession}
+          targetSlot={availableHeaterSlot}
+          nextMatchNumber={nextMatch?.matchNumber ?? null}
+          onClose={() => setMoveToHeaterSession(null)}
         />
       )}
     </div>

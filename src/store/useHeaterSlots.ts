@@ -21,6 +21,7 @@ export async function placeOnHeater(
   batteryId: string,
   slotNumber: 1 | 2,
   forMatchNumber: number | null,
+  movedBy?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const availability = await isBatteryAvailable(batteryId)
   if (!availability.available) return { ok: false, error: availability.reason }
@@ -38,6 +39,7 @@ export async function placeOnHeater(
     syncId, batteryId, slotNumber,
     placedAt: Date.now(), removedAt: null,
     forMatchNumber,
+    ...(movedBy ? { movedBy } : {}),
   })
   await enqueueSync('heaterSessions', syncId)
   flushSync()

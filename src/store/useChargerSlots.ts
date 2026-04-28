@@ -43,6 +43,16 @@ export async function placeOnCharger(
   if (openUsageEvent?.id !== undefined) {
     await db.usageEvents.update(openUsageEvent.id, { returnedAt: now })
     if (openUsageEvent.syncId) await enqueueSync('usageEvents', openUsageEvent.syncId)
+
+    // If it was a match event, also complete the active match record for this battery
+    if (openUsageEvent.eventType === 'match') {
+      const activeMatch = await db.matchRecords.where('batteryId').equals(batteryId).toArray()
+        .then((rows) => rows.find((r) => r.status === 'active'))
+      if (activeMatch?.id !== undefined) {
+        await db.matchRecords.update(activeMatch.id, { status: 'complete', completedAt: now })
+        if (activeMatch.syncId) await enqueueSync('matchRecords', activeMatch.syncId)
+      }
+    }
   }
 
   // Close any existing active session for this slot

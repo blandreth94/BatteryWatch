@@ -106,13 +106,13 @@ function DetailModal({ battery, onClose }: DetailModalProps) {
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
         <span className="badge badge-muted">{battery.cycleCount} cycles</span>
         {battery.internalResistance !== null && (
-          <span className="badge badge-muted">{battery.internalResistance}mΩ</span>
+          <span className="badge badge-muted">{battery.internalResistance}Ω</span>
         )}
       </div>
 
       {/* Edit fields */}
       <div className="form-group">
-        <label>Internal resistance (mΩ)</label>
+        <label>Internal resistance (Ω)</label>
         <input type="number" step="0.1" placeholder="e.g. 120" value={resistance}
           onChange={(e) => setResistance(e.target.value)} />
       </div>
@@ -156,7 +156,7 @@ function DetailModal({ battery, onClose }: DetailModalProps) {
                 {(s.voltageAtPlacement !== null || s.voltageAtRemoval !== null) && (
                   <div className="text-muted">
                     V: {s.voltageAtPlacement ?? '–'} → {s.voltageAtRemoval ?? '–'}
-                    {s.resistanceAtPlacement !== null && ` · ${s.resistanceAtPlacement}mΩ`}
+                    {s.resistanceAtPlacement !== null && ` · ${s.resistanceAtPlacement}Ω`}
                   </div>
                 )}
                 {s.isFullCycle && <div style={{ color: 'var(--color-success)' }}>Full cycle counted</div>}
@@ -201,7 +201,7 @@ function DetailModal({ battery, onClose }: DetailModalProps) {
               {(e.voltageAtTake !== null || e.resistanceAtTake !== null) && (
                 <div className="text-muted">
                   {e.voltageAtTake !== null && `V0: ${e.voltageAtTake}V`}
-                  {e.resistanceAtTake !== null && ` · ${e.resistanceAtTake}mΩ`}
+                  {e.resistanceAtTake !== null && ` · ${e.resistanceAtTake}Ω`}
                 </div>
               )}
               {!e.returnedAt && <div style={{ color: 'var(--color-warning)', marginTop: '0.2rem' }}>Not yet returned</div>}
@@ -286,7 +286,7 @@ export default function Batteries() {
             <div className="battery-row__meta">
               <div>{battery.cycleCount} cycles · {loc}</div>
               {battery.internalResistance !== null && (
-                <div>{battery.internalResistance}mΩ</div>
+                <div>{battery.internalResistance}Ω</div>
               )}
               {battery.notes && <div style={{ fontStyle: 'italic' }}>{battery.notes}</div>}
             </div>
