@@ -18,7 +18,7 @@ export function buildBatteryStatuses(
 ): BatteryStatus[] {
   return batteries.map((battery) => {
     const charger = activeChargerSessions.find((s) => s.batteryId === battery.id)
-    if (charger) return { battery, location: 'charger', chargerSlot: charger.slotNumber }
+    if (charger) return { battery, location: 'charger', chargerSlot: charger.slotNumber, chargerPlacedAt: charger.placedAt }
 
     const heater = activeHeaterSessions.find((s) => s.batteryId === battery.id)
     if (heater) return { battery, location: 'heater', heaterSlot: heater.slotNumber, heaterPlacedAt: heater.placedAt }
@@ -30,28 +30,33 @@ export function buildBatteryStatuses(
   })
 }
 
+const MIN_CHARGE_MS = 60 * 60_000 // batteries must have charged >= 1 hour to be heater-eligible
+
 function selectHeaterCandidates(
   statuses: BatteryStatus[],
   lastUsedMap: Map<string, number>,
+  now: number,
 ): BatteryStatus[] {
-  // Pit AND charger batteries are candidates — anything not already on heater or in-use
-  const eligible = statuses.filter((s) => s.location === 'pit' || s.location === 'charger')
-  return eligible
-    .slice()
+  // Primary: charger batteries that have been charging for at least 1 hour,
+  // sorted by longest charging time first (oldest placedAt = most charged)
+  const chargerReady = statuses
+    .filter((s) => s.location === 'charger' && s.chargerPlacedAt !== undefined && now - s.chargerPlacedAt >= MIN_CHARGE_MS)
+    .sort((a, b) => (a.chargerPlacedAt ?? now) - (b.chargerPlacedAt ?? now)) // oldest first = longest on charger
+
+  // Fallback: pit batteries (already removed from charger), sorted by most rested
+  const pitReady = statuses
+    .filter((s) => s.location === 'pit')
     .sort((a, b) => {
       const aLastUsed = lastUsedMap.get(a.battery.id)
       const bLastUsed = lastUsedMap.get(b.battery.id)
-      // Never-used batteries are ranked after used ones (they're fresher, less cycle-worn)
-      // Among used batteries, most rested (longest since last use) comes first
       if (!aLastUsed && !bLastUsed) return a.battery.cycleCount - b.battery.cycleCount
-      if (!aLastUsed) return 1   // b is used, a is never used — prefer b (it's been through the cycle)
+      if (!aLastUsed) return 1
       if (!bLastUsed) return -1
-      const aRest = aLastUsed
-      const bRest = bLastUsed
-      if (aRest !== bRest) return aRest - bRest // older last-use = more rest = lower number = comes first
+      if (aLastUsed !== bLastUsed) return aLastUsed - bLastUsed // older last-use = more rest = comes first
       return a.battery.cycleCount - b.battery.cycleCount
     })
-    .slice(0, 2)
+
+  return [...chargerReady, ...pitReady].slice(0, 2)
 }
 
 export function computeHeaterSuggestions(
@@ -78,7 +83,7 @@ export function computeHeaterSuggestions(
   // Slot 1 warms for the next match, slot 2 warms for the match after that
   const matchForSlot: [MatchRecord, MatchRecord] = [nextMatch, upcoming[1] ?? nextMatch]
 
-  const candidates = selectHeaterCandidates(statuses, lastUsedMap)
+  const candidates = selectHeaterCandidates(statuses, lastUsedMap, now)
 
   return ([1, 2] as const).map((slot, i): HeaterSlotSuggestion => {
     const activeSession = activeHeaterSessions.find((s) => s.slotNumber === slot)

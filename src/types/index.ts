@@ -97,6 +97,7 @@ export interface BatteryStatus {
   battery: Battery
   location: BatteryLocation
   chargerSlot?: number
+  chargerPlacedAt?: number   // Unix ms when placed on current charger session
   heaterSlot?: 1 | 2
   heaterPlacedAt?: number
 }
