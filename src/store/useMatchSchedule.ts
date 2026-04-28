@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/schema'
 import { enqueueSync, flushSync } from '../sync/syncEngine'
+import { generateId } from '../utils/uuid'
 import type { MatchRecord } from '../types'
 
 export function useMatchSchedule(): MatchRecord[] {
@@ -18,7 +19,7 @@ export function useUpcomingMatches(): MatchRecord[] {
 }
 
 export async function addMatch(matchNumber: number, scheduledTime: number): Promise<void> {
-  const syncId = crypto.randomUUID()
+  const syncId = generateId()
   await db.matchRecords.add({
     syncId, matchNumber, scheduledTime,
     batteryId: null, completedAt: null, status: 'upcoming',
@@ -72,7 +73,7 @@ export async function importFromTBA(eventKey: string, apiKey: string, teamNumber
     await db.matchRecords.where('status').equals('upcoming').delete()
     for (const m of ourMatches) {
       await db.matchRecords.add({
-        syncId: crypto.randomUUID(),
+        syncId: generateId(),
         matchNumber: m.match_number,
         scheduledTime: m.predicted_time ? m.predicted_time * 1000 : m.time * 1000,
         batteryId: null, completedAt: null, status: 'upcoming',

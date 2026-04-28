@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/schema'
 import { enqueueSync, flushSync } from '../sync/syncEngine'
+import { generateId } from '../utils/uuid'
 import type { BatteryUsageEvent } from '../types'
 
 export function useUsageEvents(batteryId?: string): BatteryUsageEvent[] {
@@ -34,7 +35,7 @@ export async function isBatteryAvailable(batteryId: string): Promise<{ available
 }
 
 export async function recordUsageEvent(event: Omit<BatteryUsageEvent, 'id' | 'syncId'>): Promise<void> {
-  const syncId = crypto.randomUUID()
+  const syncId = generateId()
   await db.usageEvents.add({ ...event, syncId })
   await enqueueSync('usageEvents', syncId)
   flushSync()

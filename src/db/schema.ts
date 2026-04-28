@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable, type Table } from 'dexie'
 import type { Battery, ChargerSession, HeaterSession, BatteryUsageEvent, MatchRecord, AppSettings, PendingSync } from '../types'
+import { generateId } from '../utils/uuid'
 
 class BatteryWatchDB extends Dexie {
   batteries!: EntityTable<Battery, 'id'>
@@ -42,7 +43,7 @@ class BatteryWatchDB extends Dexie {
         // Assign syncIds to all existing records that predate cloud sync
         for (const tableName of ['chargerSessions', 'heaterSessions', 'usageEvents', 'matchRecords']) {
           await tx.table(tableName).toCollection().modify((record: Record<string, unknown>) => {
-            if (!record.syncId) record.syncId = crypto.randomUUID()
+            if (!record.syncId) record.syncId = generateId()
           })
         }
       })

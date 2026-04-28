@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/schema'
 import { enqueueSync, flushSync } from '../sync/syncEngine'
+import { generateId } from '../utils/uuid'
 import type { ChargerSession } from '../types'
 
 export const TOTAL_SLOTS = 9
@@ -52,7 +53,7 @@ export async function placeOnCharger(
     if (activeSlot.syncId) await enqueueSync('chargerSessions', activeSlot.syncId)
   }
 
-  const syncId = crypto.randomUUID()
+  const syncId = generateId()
   await db.chargerSessions.add({
     syncId, batteryId, slotNumber,
     placedAt: now, removedAt: null,

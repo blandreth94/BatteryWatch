@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/schema'
 import { isBatteryAvailable } from './useUsageEvents'
 import { enqueueSync, flushSync } from '../sync/syncEngine'
+import { generateId } from '../utils/uuid'
 import type { HeaterSession } from '../types'
 
 export function useActiveHeaterSessions(): HeaterSession[] {
@@ -32,7 +33,7 @@ export async function placeOnHeater(
     if (active.syncId) await enqueueSync('heaterSessions', active.syncId)
   }
 
-  const syncId = crypto.randomUUID()
+  const syncId = generateId()
   await db.heaterSessions.add({
     syncId, batteryId, slotNumber,
     placedAt: Date.now(), removedAt: null,
