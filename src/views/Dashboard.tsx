@@ -156,7 +156,7 @@ interface HeaterSlotCardProps {
   onRemove: () => void
 }
 
-function HeaterSlotCard({ suggestion, activeSession, heaterWarmMinutes, nextMatchId: _nextMatchId, now, onTakeForMatch, onPlaceConfirm, onRemove }: HeaterSlotCardProps) {
+function HeaterSlotCard({ suggestion, activeSession, heaterWarmMinutes, nextMatchId: _nextMatchId, now: _now, onTakeForMatch, onPlaceConfirm, onRemove }: HeaterSlotCardProps) {
   let cardClass = 'heater-card'
   const { action, batteryId, minutesWarm, placedAt, minutesUntilPlace, forMatchNumber } = suggestion
 
@@ -165,64 +165,70 @@ function HeaterSlotCard({ suggestion, activeSession, heaterWarmMinutes, nextMatc
   else if (action === 'place_now') cardClass += ' heater-card--action'
 
   const progressPct = minutesWarm !== null ? Math.min(100, (minutesWarm / heaterWarmMinutes) * 100) : 0
-  const totalOnHeaterMs = activeSession ? now - activeSession.placedAt : null
 
   return (
     <div className={cardClass}>
-      <div className="heater-card__label">
-        Heater {suggestion.slotNumber}
-        {forMatchNumber ? ` · Match ${forMatchNumber}` : ''}
-      </div>
-      <div className="heater-card__battery">
-        {batteryId ?? <span className="text-muted" style={{ fontWeight: 400, fontSize: '1rem' }}>Empty</span>}
+      {/* Header row: label left, battery ID right */}
+      <div className="heater-card__header">
+        <div className="heater-card__label">
+          Heater {suggestion.slotNumber}
+          {forMatchNumber ? ` · Match ${forMatchNumber}` : ''}
+        </div>
+        <div className="heater-card__battery">
+          {batteryId ?? <span className="text-muted" style={{ fontWeight: 400, fontSize: '0.9rem' }}>Empty</span>}
+        </div>
       </div>
 
       {activeSession && minutesWarm !== null && (
         <>
-          <div className="heater-card__status">
-            {action === 'ready' ? '✅ Ready' : '🔥 Warming'}
-            {' — '}{minutesWarm}min / {heaterWarmMinutes}min
+          {/* Status + placed-at on one line */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: '0.82rem' }}>
+            <span className="heater-card__status" style={{ fontSize: '0.82rem' }}>
+              {action === 'ready' ? '✅ Ready' : '🔥 Warming'}
+              {' — '}{minutesWarm}min / {heaterWarmMinutes}min
+            </span>
+            {placedAt && (
+              <span style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
+                since {formatTime(placedAt)}
+              </span>
+            )}
           </div>
-          {placedAt && (
-            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-              Placed at {formatTime(placedAt)}
-              {totalOnHeaterMs !== null && ` · ${formatDuration(totalOnHeaterMs)} total`}
-            </div>
-          )}
           <div className="heater-card__progress">
             <div
               className={`heater-card__progress-fill${action === 'ready' ? ' heater-card__progress-fill--done' : ''}`}
               style={{ width: `${progressPct}%` }}
             />
           </div>
-          {action === 'ready' && (
-            <button className="btn-primary" style={{ marginTop: '0.5rem', width: '100%' }} onClick={onTakeForMatch}>
-              Take for Match {forMatchNumber}
+          {/* Action buttons side by side */}
+          <div className="row" style={{ marginTop: '0.4rem', gap: '0.4rem' }}>
+            {action === 'ready' ? (
+              <button className="btn-primary" style={{ flex: 1 }} onClick={onTakeForMatch}>
+                Take for M{forMatchNumber}
+              </button>
+            ) : (
+              <button className="btn-ghost" style={{ flex: 1 }} onClick={onTakeForMatch}>
+                Take anyway
+              </button>
+            )}
+            <button
+              className="btn-ghost"
+              style={{ flex: 1, fontSize: '0.78rem', color: 'var(--color-text-muted)' }}
+              onClick={onRemove}
+            >
+              Remove
             </button>
-          )}
-          {action === 'occupied_not_ready' && (
-            <button className="btn-ghost" style={{ marginTop: '0.5rem', width: '100%' }} onClick={onTakeForMatch}>
-              Take anyway
-            </button>
-          )}
-          <button
-            className="btn-ghost"
-            style={{ marginTop: '0.35rem', width: '100%', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}
-            onClick={onRemove}
-          >
-            Remove (not for match)
-          </button>
+          </div>
         </>
       )}
 
       {!activeSession && batteryId && (
         <>
-          <div className="heater-card__status">
+          <div className="heater-card__status" style={{ fontSize: '0.82rem' }}>
             {action === 'place_now' ? '⚡ Place now!' : `⏱ Place in ${minutesUntilPlace}min`}
           </div>
           <button
             className={action === 'place_now' ? 'btn-primary' : 'btn-ghost'}
-            style={{ marginTop: '0.5rem', width: '100%' }}
+            style={{ marginTop: '0.4rem', width: '100%' }}
             onClick={onPlaceConfirm}
           >
             {action === 'place_now' ? 'Place on heater' : 'Place now'}
@@ -641,15 +647,17 @@ export default function Dashboard() {
             <h2>Next Up: Match {nextMatch.matchNumber}</h2>
           </div>
           {topSuggestion ? (
-            <div className="suggestion-card">
-              <div className="suggestion-card__label">Recommended battery</div>
-              <div className="suggestion-card__battery">{topSuggestion.batteryId}</div>
-              <div className="suggestion-card__reason">{topSuggestion.reason}</div>
-              {alternates.length > 0 && (
-                <div className="suggestion-card__alts">
-                  Alt: {alternates.map((a) => a.batteryId).join(', ')}
-                </div>
-              )}
+            <div className="suggestion-card" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <div className="suggestion-card__battery" style={{ flexShrink: 0 }}>{topSuggestion.batteryId}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="suggestion-card__label" style={{ marginBottom: '0.15rem' }}>Recommended</div>
+                <div className="suggestion-card__reason">{topSuggestion.reason}</div>
+                {alternates.length > 0 && (
+                  <div className="suggestion-card__alts" style={{ marginTop: '0.2rem' }}>
+                    Alt: {alternates.map((a) => a.batteryId).join(', ')}
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <p className="text-muted" style={{ fontSize: '0.9rem' }}>
