@@ -34,29 +34,16 @@ const MIN_CHARGE_MS = 60 * 60_000 // batteries must have charged >= 1 hour to be
 
 function selectHeaterCandidates(
   statuses: BatteryStatus[],
-  lastUsedMap: Map<string, number>,
+  _lastUsedMap: Map<string, number>,
   now: number,
 ): BatteryStatus[] {
-  // Primary: charger batteries that have been charging for at least 1 hour,
-  // sorted by longest charging time first (oldest placedAt = most charged)
-  const chargerReady = statuses
+  // Batteries are always on a charger, heater, or in use — "pit" is an edge case.
+  // Candidates are charger batteries that have been charging >= 1 hour,
+  // sorted by longest charging time first (oldest placedAt = most charged = highest priority).
+  return statuses
     .filter((s) => s.location === 'charger' && s.chargerPlacedAt !== undefined && now - s.chargerPlacedAt >= MIN_CHARGE_MS)
-    .sort((a, b) => (a.chargerPlacedAt ?? now) - (b.chargerPlacedAt ?? now)) // oldest first = longest on charger
-
-  // Fallback: pit batteries (already removed from charger), sorted by most rested
-  const pitReady = statuses
-    .filter((s) => s.location === 'pit')
-    .sort((a, b) => {
-      const aLastUsed = lastUsedMap.get(a.battery.id)
-      const bLastUsed = lastUsedMap.get(b.battery.id)
-      if (!aLastUsed && !bLastUsed) return a.battery.cycleCount - b.battery.cycleCount
-      if (!aLastUsed) return 1
-      if (!bLastUsed) return -1
-      if (aLastUsed !== bLastUsed) return aLastUsed - bLastUsed // older last-use = more rest = comes first
-      return a.battery.cycleCount - b.battery.cycleCount
-    })
-
-  return [...chargerReady, ...pitReady].slice(0, 2)
+    .sort((a, b) => (a.chargerPlacedAt ?? now) - (b.chargerPlacedAt ?? now))
+    .slice(0, 2)
 }
 
 export function computeHeaterSuggestions(
