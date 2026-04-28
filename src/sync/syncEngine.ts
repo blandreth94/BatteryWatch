@@ -183,6 +183,9 @@ async function _buildRow(table: SyncableTable, syncId: string): Promise<Record<s
         battery_id: r.batteryId, slot_number: r.slotNumber,
         placed_at: r.placedAt, removed_at: r.removedAt,
         for_match_number: r.forMatchNumber,
+        moved_by: r.movedBy ?? null,
+        removed_by: r.removedBy ?? null,
+        voltage_at_removal: r.voltageAtRemoval ?? null,
       }
     }
     case 'usageEvents': {
@@ -278,6 +281,9 @@ export async function pullFromSupabase(): Promise<void> {
         await _upsertBySyncId(db.heaterSessions, hsRes.data.map((r: any): HeaterSession => ({
           syncId: r.sync_id, batteryId: r.battery_id, slotNumber: r.slot_number,
           placedAt: r.placed_at, removedAt: r.removed_at, forMatchNumber: r.for_match_number,
+          movedBy: r.moved_by ?? undefined,
+          removedBy: r.removed_by ?? undefined,
+          voltageAtRemoval: r.voltage_at_removal ?? undefined,
         })))
       }
 
