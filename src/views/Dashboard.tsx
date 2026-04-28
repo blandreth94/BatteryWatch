@@ -636,18 +636,22 @@ export default function Dashboard() {
     if (!existing || e.takenAt > existing.takenAt) lastEventByBattery.set(e.batteryId, e)
   }
 
-  // Batteries that need charging: not currently on a charger, heater, or in use.
-  // Sorted by most recently returned from use first (just came back → place first).
-  const activeUsageSet = new Set(allUsageEvents.filter((e) => e.returnedAt === null).map((e) => e.batteryId))
+  // Batteries that need charging: not currently on a charger or heater.
+  // Includes in-use batteries so they can be quickly returned to a charger slot.
+  // Sorted by most recently taken out first (just returned from match → place first).
+  const activeUsageByBattery = new Map<string, BatteryUsageEvent>()
+  for (const e of allUsageEvents) {
+    if (e.returnedAt === null) activeUsageByBattery.set(e.batteryId, e)
+  }
   const chargerSet = new Set(activeSessions.map((s) => s.batteryId))
   const heaterSet = new Set(activeHeaterSessions.map((s) => s.batteryId))
   const batteriesNeedingCharge = allBatteries
-    .filter((b) => !chargerSet.has(b.id) && !heaterSet.has(b.id) && !activeUsageSet.has(b.id))
+    .filter((b) => !chargerSet.has(b.id) && !heaterSet.has(b.id))
     .sort((a, b) => {
       const aLast = lastEventByBattery.get(a.id)
       const bLast = lastEventByBattery.get(b.id)
       if (!aLast && !bLast) return 0
-      if (!aLast) return 1   // prefer batteries that have been used (just returned)
+      if (!aLast) return 1
       if (!bLast) return -1
       return bLast.takenAt - aLast.takenAt  // most recently used first
     })
@@ -772,6 +776,7 @@ export default function Dashboard() {
                 }
 
                 const suggestedId = suggestedBatteryBySlot.get(slot)
+                const suggestedInUse = suggestedId ? activeUsageByBattery.get(suggestedId) : undefined
                 return (
                   <div key={slot} className="bay-card bay-card--empty" onClick={() => setSelectedSlot(slot)}>
                     <div className="bay-card__header">
@@ -781,7 +786,11 @@ export default function Dashboard() {
                         : <span style={{ fontSize: '1.1rem', color: 'var(--color-text-muted)' }}>+</span>}
                     </div>
                     {suggestedId && (
-                      <div className="bay-card__detail" style={{ marginTop: '0.2rem' }}>Tap to place</div>
+                      <div className="bay-card__detail" style={{ marginTop: '0.2rem' }}>
+                        {suggestedInUse
+                          ? `← ${suggestedInUse.eventType === 'match' ? `Match ${suggestedInUse.matchNumber}` : 'Practice'}`
+                          : 'Tap to place'}
+                      </div>
                     )}
                   </div>
                 )
