@@ -4,7 +4,6 @@ import { useMatchSchedule } from './store/useMatchSchedule'
 import { useSettings } from './store/useSettings'
 import { initSync } from './sync/syncEngine'
 import Dashboard from './views/Dashboard'
-import ChargerBoard from './views/ChargerBoard'
 import Batteries from './views/Batteries'
 import MatchSchedule from './views/MatchSchedule'
 import Settings from './views/Settings'
@@ -46,10 +45,6 @@ function Nav() {
         <span className="bottom-nav__icon">🏠</span>
         <span>Dashboard</span>
       </NavLink>
-      <NavLink to="/chargers" className={({ isActive }) => 'bottom-nav__item' + (isActive ? ' active' : '')}>
-        <span className="bottom-nav__icon">🔋</span>
-        <span>Chargers</span>
-      </NavLink>
       <NavLink to="/batteries" className={({ isActive }) => 'bottom-nav__item' + (isActive ? ' active' : '')}>
         <span className="bottom-nav__icon">📋</span>
         <span>Batteries</span>
@@ -77,7 +72,6 @@ export default function App() {
         <main className="app-content">
           <Routes>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/chargers" element={<ChargerBoard />} />
             <Route path="/batteries" element={<Batteries />} />
             <Route path="/schedule" element={<MatchSchedule />} />
             <Route path="/settings" element={<Settings />} />

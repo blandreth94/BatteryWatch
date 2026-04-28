@@ -17,14 +17,19 @@
 .bay-card--ready    { border-color: var(--color-success); }
 .bay-card--warning  { border-color: var(--color-danger); }
 
+.bay-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
 .bay-card__slot {
-  font-size: 0.7rem;
+  font-size: 0.9rem;
+  font-weight: 700;
   color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 .bay-card__battery-id {
-  font-size: 1.1rem;
+  font-size: 0.9rem;
   font-weight: 700;
 }
 .bay-card__detail {
