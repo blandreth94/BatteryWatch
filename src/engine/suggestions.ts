@@ -69,7 +69,25 @@ export function computeHeaterSuggestions(
     .sort((a, b) => a.scheduledTime - b.scheduledTime)
 
   const nextMatch = upcoming[0]
-  if (!nextMatch) return slots.map(idle)
+  if (!nextMatch) {
+    // No upcoming matches — still show occupied slots so placed batteries remain visible
+    return slots.map((slot): HeaterSlotSuggestion => {
+      const activeSession = activeHeaterSessions.find((s) => s.slotNumber === slot)
+      if (!activeSession) return idle(slot)
+      const minutesWarm = Math.floor((now - activeSession.placedAt) / 60_000)
+      const isReady = minutesWarm >= settings.heaterWarmMinutes
+      return {
+        slotNumber: slot,
+        batteryId: activeSession.batteryId,
+        action: isReady ? 'ready' : 'occupied_not_ready',
+        minutesUntilPlace: null,
+        minutesWarm,
+        placedAt: activeSession.placedAt,
+        forMatchNumber: activeSession.forMatchNumber,
+        minutesUntilDeadline: null,
+      }
+    })
+  }
 
   // Slot i warms for upcoming match i (clamped to last available match)
   const matchForSlot = slots.map((_, i) => upcoming[i] ?? upcoming[upcoming.length - 1])
