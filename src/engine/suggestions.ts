@@ -83,6 +83,7 @@ export function computeHeaterSuggestions(
         minutesUntilPlace: null,
         minutesWarm,
         placedAt: activeSession.placedAt,
+        targetPlacementMs: null,
         forMatchNumber: activeSession.forMatchNumber,
         minutesUntilDeadline: null,
       }
