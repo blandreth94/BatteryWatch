@@ -113,6 +113,7 @@ export interface HeaterSlotSuggestion {
   minutesUntilPlace: number | null
   minutesWarm: number | null         // how long it has been on heater
   placedAt: number | null            // absolute timestamp of heater placement
+  targetPlacementMs: number | null   // absolute Unix ms when battery should be placed
   forMatchNumber: number | null
   minutesUntilDeadline: number | null
 }
