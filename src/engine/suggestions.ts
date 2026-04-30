@@ -60,7 +60,7 @@ export function computeHeaterSuggestions(
 
   const idle = (slotNumber: number): HeaterSlotSuggestion => ({
     slotNumber, batteryId: null, action: 'idle',
-    minutesUntilPlace: null, minutesWarm: null, placedAt: null,
+    minutesUntilPlace: null, minutesWarm: null, placedAt: null, targetPlacementMs: null,
     forMatchNumber: null, minutesUntilDeadline: null,
   })
 
@@ -94,6 +94,7 @@ export function computeHeaterSuggestions(
         minutesUntilPlace: null,
         minutesWarm,
         placedAt: activeSession.placedAt,
+        targetPlacementMs,
         forMatchNumber: activeSession.forMatchNumber ?? targetMatch.matchNumber,
         minutesUntilDeadline,
       }
@@ -104,6 +105,7 @@ export function computeHeaterSuggestions(
       return {
         slotNumber: slot, batteryId: null, action: 'idle',
         minutesUntilPlace: null, minutesWarm: null, placedAt: null,
+        targetPlacementMs,
         forMatchNumber: targetMatch.matchNumber, minutesUntilDeadline,
       }
     }
@@ -116,6 +118,7 @@ export function computeHeaterSuggestions(
       minutesUntilPlace: minutesUntilPlace > 0 ? minutesUntilPlace : null,
       minutesWarm: null,
       placedAt: null,
+      targetPlacementMs,
       forMatchNumber: targetMatch.matchNumber,
       minutesUntilDeadline,
     }
@@ -129,7 +132,7 @@ export function rankBatteriesForNextMatch(
   settings: AppSettings,
   now: number,
 ): MatchBatterySuggestion[] {
-  const eligible = statuses.filter((s) => s.location === 'heater' || s.location === 'pit')
+  const eligible = statuses.filter((s) => s.location !== 'in-use')
 
   return eligible
     .map((s): MatchBatterySuggestion => {
@@ -139,17 +142,28 @@ export function rankBatteriesForNextMatch(
         : null
       const isWarm = minutesOnHeater !== null && minutesOnHeater >= settings.heaterWarmMinutes
 
+      const chargeMinutes = s.location === 'charger' && s.chargerPlacedAt !== undefined
+        ? Math.floor((now - s.chargerPlacedAt) / 60_000)
+        : null
+
       const lastUsed = lastUsedMap.get(s.battery.id)
       const restMinutes = lastUsed ? Math.floor((now - lastUsed) / 60_000) : null
 
-      let score = 0
-      if (!isWarm) score += 1000
-      // More rest = better (lower score) — only applies if battery has been used
+      // Tier 1: warm heater (0), Tier 2: unready heater (500),
+      // Tier 3: charger — prefer longest charging (1000 − chargeMinutes), Tier 4: pit (2000)
+      let score: number
+      if (isWarm) score = 0
+      else if (s.location === 'heater') score = 500
+      else if (chargeMinutes !== null) score = 1000 - chargeMinutes
+      else score = 2000
+
       if (restMinutes !== null) score -= restMinutes
       score += s.battery.cycleCount
 
       const reasons: string[] = []
       if (isWarm && minutesOnHeater !== null) reasons.push(`${minutesOnHeater}min on heater`)
+      else if (minutesOnHeater !== null) reasons.push(`${minutesOnHeater}min warming`)
+      else if (chargeMinutes !== null) reasons.push(`${chargeMinutes}min charging`)
       if (restMinutes !== null && restMinutes > 0) reasons.push(`${restMinutes}min rest`)
       else if (!lastUsed) reasons.push('never used')
       reasons.push(`${s.battery.cycleCount} cycles`)

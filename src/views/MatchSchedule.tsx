@@ -4,14 +4,7 @@ import { useBatteries } from '../store/useBatteries'
 import { useSettings } from '../store/useSettings'
 import Modal from '../components/Modal'
 import type { MatchRecord } from '../types'
-
-function formatTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-function formatDate(ms: number): string {
-  return new Date(ms).toLocaleDateString([], { month: 'short', day: 'numeric' })
-}
+import { formatTime, formatDate } from '../utils/time'
 
 interface AssignModalProps {
   match: MatchRecord

@@ -10,10 +10,7 @@ import { useBatteries } from '../store/useBatteries'
 import { db } from '../db/schema'
 import Modal from '../components/Modal'
 import type { HeaterSlotSuggestion, HeaterSession, BatteryUsageEvent, ChargerSession } from '../types'
-
-function formatTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
+import { formatDayTime } from '../utils/time'
 
 function formatDuration(ms: number): string {
   const totalMin = Math.floor(ms / 60_000)
@@ -31,7 +28,7 @@ function chargerLabel(slot: number): string {
 function lastUsageLabel(event: BatteryUsageEvent | undefined): string | null {
   if (!event) return null
   if (event.eventType === 'match') return `Last: Match ${event.matchNumber}`
-  return `Last: Practice ${formatTime(event.takenAt)}`
+  return `Last: Practice ${formatDayTime(event.takenAt)}`
 }
 
 // ── Take for Match modal ──────────────────────────────────────────────────────
@@ -78,6 +75,109 @@ function TakeForMatchModal({ batteryId, fromSession, matchNumber, matchId, onClo
     <Modal title={`Take ${batteryId} for Match ${matchNumber ?? '?'}`} onClose={onClose}>
       <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
         Record battery stats before taking it to the robot.
+      </p>
+      <div className="form-row">
+        <div className="form-group">
+          <label>Voltage V0</label>
+          <input type="number" step="0.01" placeholder="e.g. 12.5" value={voltage}
+            onChange={(e) => setVoltage(e.target.value)} autoFocus />
+        </div>
+        <div className="form-group">
+          <label>Resistance (Ω)</label>
+          <input type="number" step="0.1" placeholder="e.g. 120" value={resistance}
+            onChange={(e) => setResistance(e.target.value)} />
+        </div>
+      </div>
+      <div className="form-group">
+        <label>Taken by</label>
+        <input type="text" placeholder="Name or initials" value={takenBy}
+          onChange={(e) => setTakenBy(e.target.value)} />
+      </div>
+      {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{error}</p>}
+      <div className="row">
+        <button className="btn-primary" style={{ flex: 1 }} onClick={handleConfirm} disabled={submitting}>
+          {submitting ? 'Saving…' : 'Confirm — take battery'}
+        </button>
+        <button className="btn-ghost" onClick={onClose}>Cancel</button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── Take suggestion modal (works from heater, charger, or pit) ───────────────
+
+interface TakeSuggestionModalProps {
+  batteryId: string
+  heaterSession: HeaterSession | null
+  chargerSession: ChargerSession | null
+  defaultEventType: 'match' | 'practice'
+  matchNumber: number | null
+  matchId: number | undefined
+  onClose: () => void
+}
+
+function TakeSuggestionModal({ batteryId, heaterSession, chargerSession, defaultEventType, matchNumber, matchId, onClose }: TakeSuggestionModalProps) {
+  const [eventType, setEventType] = useState<'match' | 'practice'>(defaultEventType)
+  const [voltage, setVoltage] = useState('')
+  const [resistance, setResistance] = useState('')
+  const [takenBy, setTakenBy] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  const fromLocation = heaterSession ? 'heater' : chargerSession ? 'charger' : 'pit'
+  const fromSlot = heaterSession?.slotNumber ?? chargerSession?.slotNumber ?? null
+
+  async function handleConfirm() {
+    if (!takenBy.trim()) { setError('Please enter who is taking the battery.'); return }
+    setSubmitting(true)
+    try {
+      if (heaterSession) await removeFromHeater(heaterSession)
+      else if (chargerSession) await removeFromCharger(chargerSession, voltage ? parseFloat(voltage) : null, false)
+      await recordUsageEvent({
+        batteryId, eventType,
+        matchNumber: eventType === 'match' ? matchNumber : null,
+        takenAt: Date.now(), returnedAt: null, takenBy: takenBy.trim(),
+        voltageAtTake: voltage ? parseFloat(voltage) : null,
+        resistanceAtTake: resistance ? parseFloat(resistance) : null,
+        fromLocation, fromSlot, notes: '',
+      })
+      if (eventType === 'match' && matchId !== undefined) {
+        await assignBatteryToMatch(matchId, batteryId)
+        await startMatch(matchId)
+      }
+      onClose()
+    } catch {
+      setError('Something went wrong. Please try again.')
+      setSubmitting(false)
+    }
+  }
+
+  const title = eventType === 'match'
+    ? `Take ${batteryId} for Match ${matchNumber ?? '?'}`
+    : `Take ${batteryId} for Practice`
+
+  return (
+    <Modal title={title} onClose={onClose}>
+      {matchNumber !== null && (
+        <div className="row" style={{ marginBottom: '1rem', gap: '0.5rem' }}>
+          <button
+            className={eventType === 'match' ? 'btn-primary' : 'btn-ghost'}
+            style={{ flex: 1 }}
+            onClick={() => setEventType('match')}
+          >
+            Match {matchNumber}
+          </button>
+          <button
+            className={eventType === 'practice' ? 'btn-primary' : 'btn-ghost'}
+            style={{ flex: 1 }}
+            onClick={() => setEventType('practice')}
+          >
+            Practice
+          </button>
+        </div>
+      )}
+      <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
+        Taking from {fromLocation === 'heater' ? `Heater ${fromSlot}` : fromLocation === 'charger' ? `Charger slot ${fromSlot}` : 'Pit'}.
       </p>
       <div className="form-row">
         <div className="form-group">
@@ -158,7 +258,7 @@ interface HeaterSlotCardProps {
 
 function HeaterSlotCard({ suggestion, activeSession, heaterWarmMinutes, nextMatchId: _nextMatchId, now: _now, onTakeForMatch, onPlaceConfirm, onRemove }: HeaterSlotCardProps) {
   let cardClass = 'heater-card'
-  const { action, batteryId, minutesWarm, placedAt, minutesUntilPlace, forMatchNumber } = suggestion
+  const { action, batteryId, minutesWarm, placedAt, targetPlacementMs, minutesUntilPlace, forMatchNumber } = suggestion
 
   if (action === 'ready') cardClass += ' heater-card--warm'
   else if (action === 'occupied_not_ready') cardClass += ' heater-card--active'
@@ -189,7 +289,7 @@ function HeaterSlotCard({ suggestion, activeSession, heaterWarmMinutes, nextMatc
             </span>
             {placedAt && (
               <span style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
-                since {formatTime(placedAt)}
+                since {formatDayTime(placedAt)}
               </span>
             )}
           </div>
@@ -224,7 +324,10 @@ function HeaterSlotCard({ suggestion, activeSession, heaterWarmMinutes, nextMatc
       {!activeSession && batteryId && (
         <>
           <div className="heater-card__status" style={{ fontSize: '0.82rem' }}>
-            {action === 'place_now' ? '⚡ Place now!' : `⏱ Place in ${minutesUntilPlace}min`}
+            {action === 'place_now'
+              ? '⚡ Place now!'
+              : <>⏱ Place in {formatDuration((minutesUntilPlace ?? 0) * 60_000)}{targetPlacementMs && <span style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}> · {formatDayTime(targetPlacementMs)}</span>}</>
+            }
           </div>
           <button
             className={action === 'place_now' ? 'btn-primary' : 'btn-ghost'}
@@ -238,7 +341,7 @@ function HeaterSlotCard({ suggestion, activeSession, heaterWarmMinutes, nextMatc
 
       {!activeSession && !batteryId && (
         <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
-          {forMatchNumber ? 'No eligible batteries available' : 'No upcoming match'}
+          {forMatchNumber ? 'No batteries charged long enough yet' : 'No upcoming match'}
         </div>
       )}
     </div>
@@ -478,7 +581,7 @@ function ChargerSlotModal({ slotNumber, existingSession, lastUsageEvent, availab
           <div style={{ marginBottom: '0.75rem' }}>
             <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{existingSession.batteryId}</div>
             <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
-              On charger since {formatTime(existingSession.placedAt)} · {formatDuration(elapsed)}
+              On charger since {formatDayTime(existingSession.placedAt)} · {formatDuration(elapsed)}
             </div>
             {existingSession.voltageAtPlacement !== null && (
               <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
@@ -616,6 +719,12 @@ export default function Dashboard() {
   const allUsageEvents = useUsageEvents()
 
   const [takeForMatchTarget, setTakeForMatchTarget] = useState<{ suggestion: HeaterSlotSuggestion; session: HeaterSession } | null>(null)
+  const [takeSuggestionTarget, setTakeSuggestionTarget] = useState<{
+    batteryId: string
+    heaterSession: HeaterSession | null
+    chargerSession: ChargerSession | null
+    defaultEventType: 'match' | 'practice'
+  } | null>(null)
   const [placeOnHeaterTarget, setPlaceOnHeaterTarget] = useState<HeaterSlotSuggestion | null>(null)
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null)
   const [moveToHeaterSession, setMoveToHeaterSession] = useState<ChargerSession | null>(null)
@@ -666,13 +775,13 @@ export default function Dashboard() {
 
   return (
     <div className="stack">
-      {/* Next match */}
-      {nextMatch ? (
-        <div className="card">
-          <div className="section-header">
-            <h2>Next Up: Match {nextMatch.matchNumber}</h2>
-          </div>
-          {topSuggestion ? (
+      {/* Next Up — always shown */}
+      <div className="card">
+        <div className="section-header">
+          <h2>{nextMatch ? `Next Up: Match ${nextMatch.matchNumber}` : 'Next Up'}</h2>
+        </div>
+        {topSuggestion ? (
+          <>
             <div className="suggestion-card" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
               <div className="suggestion-card__battery" style={{ flexShrink: 0 }}>{topSuggestion.batteryId}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -685,19 +794,44 @@ export default function Dashboard() {
                 )}
               </div>
             </div>
-          ) : (
-            <p className="text-muted" style={{ fontSize: '0.9rem' }}>
-              No batteries available — check charger board.
-            </p>
-          )}
-        </div>
-      ) : (
-        <div className="card">
-          <p className="text-muted" style={{ textAlign: 'center', padding: '1rem 0' }}>
-            No upcoming matches. Add matches in the Schedule tab.
+            <div className="row" style={{ marginTop: '0.75rem', gap: '0.5rem' }}>
+              {nextMatch && (
+                <button
+                  className="btn-primary"
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    const hs = activeHeaterSessions.find((s) => s.batteryId === topSuggestion.batteryId) ?? null
+                    const cs = activeSessions.find((s) => s.batteryId === topSuggestion.batteryId) ?? null
+                    setTakeSuggestionTarget({ batteryId: topSuggestion.batteryId, heaterSession: hs, chargerSession: cs, defaultEventType: 'match' })
+                  }}
+                >
+                  Take for Match {nextMatch.matchNumber}
+                </button>
+              )}
+              <button
+                className={nextMatch ? 'btn-ghost' : 'btn-primary'}
+                style={{ flex: 1 }}
+                onClick={() => {
+                  const hs = activeHeaterSessions.find((s) => s.batteryId === topSuggestion.batteryId) ?? null
+                  const cs = activeSessions.find((s) => s.batteryId === topSuggestion.batteryId) ?? null
+                  setTakeSuggestionTarget({ batteryId: topSuggestion.batteryId, heaterSession: hs, chargerSession: cs, defaultEventType: 'practice' })
+                }}
+              >
+                Take for Practice
+              </button>
+            </div>
+          </>
+        ) : (
+          <p className="text-muted" style={{ fontSize: '0.9rem' }}>
+            No batteries available — check charger board.
           </p>
-        </div>
-      )}
+        )}
+        {!nextMatch && (
+          <p className="text-muted" style={{ fontSize: '0.78rem', marginTop: '0.5rem' }}>
+            No schedule — add matches in the Schedule tab.
+          </p>
+        )}
+      </div>
 
       {/* Heater slots */}
       <div>
@@ -748,7 +882,7 @@ export default function Dashboard() {
                         <span className="bay-card__battery-id">{session.batteryId}</span>
                       </div>
                       <div className="bay-card__header">
-                        <span className="bay-card__detail">Since {formatTime(session.placedAt)}</span>
+                        <span className="bay-card__detail">Since {formatDayTime(session.placedAt)}</span>
                         <span className="bay-card__detail">{formatDuration(elapsed)}</span>
                       </div>
                       <div className="bay-card__header" style={{ marginTop: 'auto' }}>
@@ -802,6 +936,17 @@ export default function Dashboard() {
       </div>
 
       {/* Modals */}
+      {takeSuggestionTarget && (
+        <TakeSuggestionModal
+          batteryId={takeSuggestionTarget.batteryId}
+          heaterSession={takeSuggestionTarget.heaterSession}
+          chargerSession={takeSuggestionTarget.chargerSession}
+          defaultEventType={takeSuggestionTarget.defaultEventType}
+          matchNumber={nextMatch?.matchNumber ?? null}
+          matchId={nextMatch?.id}
+          onClose={() => setTakeSuggestionTarget(null)}
+        />
+      )}
       {takeForMatchTarget && (
         <TakeForMatchModal
           batteryId={takeForMatchTarget.suggestion.batteryId!}
