@@ -22,7 +22,7 @@ export async function addMatch(matchNumber: number, scheduledTime: number): Prom
   const syncId = generateId()
   await db.matchRecords.add({
     syncId, matchNumber, scheduledTime,
-    batteryId: null, completedAt: null, status: 'upcoming',
+    batteryId: null, completedAt: null, status: 'upcoming', allianceColor: null,
   })
   await enqueueSync('matchRecords', syncId)
   flushSync()
@@ -77,6 +77,7 @@ export async function importFromTBA(eventKey: string, apiKey: string, teamNumber
         matchNumber: m.match_number,
         scheduledTime: m.predicted_time ? m.predicted_time * 1000 : m.time * 1000,
         batteryId: null, completedAt: null, status: 'upcoming',
+        allianceColor: m.alliances.red.team_keys.includes(team) ? 'red' : 'blue',
       })
     }
   })

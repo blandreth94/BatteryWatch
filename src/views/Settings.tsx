@@ -255,6 +255,10 @@ export default function Settings() {
               </p>
             )}
           </div>
+          <div className="form-group">
+            <label>Charge ready (min)</label>
+            <input type="number" min={30} max={240} {...field('chargeReadyMinutes')} />
+          </div>
         </div>
       </div>
 

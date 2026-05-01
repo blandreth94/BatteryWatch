@@ -59,6 +59,7 @@ export interface MatchRecord {
   batteryId: string | null;
   completedAt: number | null;
   status: 'upcoming' | 'active' | 'complete';
+  allianceColor: 'red' | 'blue' | null;
 }
 
 export interface AppSettings {
@@ -69,6 +70,7 @@ export interface AppSettings {
   heaterWarmMinutes: number;     // default 30
   walkAndQueueMinutes: number;   // lead time, default 20
   heaterSlotCount: number;       // default 2
+  chargeReadyMinutes: number;    // default 90
   tbaApiKey: string;
   tbaEventKey: string;
 }
@@ -81,6 +83,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   heaterWarmMinutes: 30,
   walkAndQueueMinutes: 20,
   heaterSlotCount: 2,
+  chargeReadyMinutes: 90,
   tbaApiKey: '',
   tbaEventKey: '',
 }
