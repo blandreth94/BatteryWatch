@@ -2,13 +2,17 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useSuggestions } from '../store/useSuggestions'
 import { useActiveHeaterSessions, placeOnHeater, removeFromHeater } from '../store/useHeaterSlots'
-import { useAllActiveChargerSessions, placeOnCharger, removeFromCharger, TOTAL_SLOTS } from '../store/useChargerSlots'
+import { useAllActiveChargerSessions, placeOnCharger, TOTAL_SLOTS } from '../store/useChargerSlots'
 import { useSettings } from '../store/useSettings'
 import { useUpcomingMatches, assignBatteryToMatch, startMatch } from '../store/useMatchSchedule'
-import { recordUsageEvent, useUsageEvents } from '../store/useUsageEvents'
+import { useUsageEvents, recordUsageEvent } from '../store/useUsageEvents'
 import { useBatteries } from '../store/useBatteries'
 import { db } from '../db/schema'
 import Modal from '../components/Modal'
+import { TakeSuggestionModal } from '../components/TakeSuggestionModal'
+import { MoveToHeaterModal } from '../components/MoveToHeaterModal'
+import { RemoveFromHeaterModal } from '../components/RemoveFromHeaterModal'
+import { BatteryManageModal } from '../components/BatteryManageModal'
 import type { HeaterSlotSuggestion, HeaterSession, BatteryUsageEvent, ChargerSession } from '../types'
 import { formatDayTime } from '../utils/time'
 
@@ -104,108 +108,6 @@ function TakeForMatchModal({ batteryId, fromSession, matchNumber, matchId, onClo
   )
 }
 
-// ── Take suggestion modal (works from heater, charger, or pit) ───────────────
-
-interface TakeSuggestionModalProps {
-  batteryId: string
-  heaterSession: HeaterSession | null
-  chargerSession: ChargerSession | null
-  defaultEventType: 'match' | 'practice'
-  matchNumber: number | null
-  matchId: number | undefined
-  onClose: () => void
-}
-
-function TakeSuggestionModal({ batteryId, heaterSession, chargerSession, defaultEventType, matchNumber, matchId, onClose }: TakeSuggestionModalProps) {
-  const [eventType, setEventType] = useState<'match' | 'practice'>(defaultEventType)
-  const [voltage, setVoltage] = useState('')
-  const [resistance, setResistance] = useState('')
-  const [takenBy, setTakenBy] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState('')
-
-  const fromLocation = heaterSession ? 'heater' : chargerSession ? 'charger' : 'pit'
-  const fromSlot = heaterSession?.slotNumber ?? chargerSession?.slotNumber ?? null
-
-  async function handleConfirm() {
-    if (!takenBy.trim()) { setError('Please enter who is taking the battery.'); return }
-    setSubmitting(true)
-    try {
-      if (heaterSession) await removeFromHeater(heaterSession)
-      else if (chargerSession) await removeFromCharger(chargerSession, voltage ? parseFloat(voltage) : null, false)
-      await recordUsageEvent({
-        batteryId, eventType,
-        matchNumber: eventType === 'match' ? matchNumber : null,
-        takenAt: Date.now(), returnedAt: null, takenBy: takenBy.trim(),
-        voltageAtTake: voltage ? parseFloat(voltage) : null,
-        resistanceAtTake: resistance ? parseFloat(resistance) : null,
-        fromLocation, fromSlot, notes: '',
-      })
-      if (eventType === 'match' && matchId !== undefined) {
-        await assignBatteryToMatch(matchId, batteryId)
-        await startMatch(matchId)
-      }
-      onClose()
-    } catch {
-      setError('Something went wrong. Please try again.')
-      setSubmitting(false)
-    }
-  }
-
-  const title = eventType === 'match'
-    ? `Take ${batteryId} for Match ${matchNumber ?? '?'}`
-    : `Take ${batteryId} for Practice`
-
-  return (
-    <Modal title={title} onClose={onClose}>
-      {matchNumber !== null && (
-        <div className="row" style={{ marginBottom: '1rem', gap: '0.5rem' }}>
-          <button
-            className={eventType === 'match' ? 'btn-primary' : 'btn-ghost'}
-            style={{ flex: 1 }}
-            onClick={() => setEventType('match')}
-          >
-            Match {matchNumber}
-          </button>
-          <button
-            className={eventType === 'practice' ? 'btn-primary' : 'btn-ghost'}
-            style={{ flex: 1 }}
-            onClick={() => setEventType('practice')}
-          >
-            Practice
-          </button>
-        </div>
-      )}
-      <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
-        Taking from {fromLocation === 'heater' ? `Heater ${fromSlot}` : fromLocation === 'charger' ? `Charger slot ${fromSlot}` : 'Pit'}.
-      </p>
-      <div className="form-row">
-        <div className="form-group">
-          <label>Voltage V0</label>
-          <input type="number" step="0.01" placeholder="e.g. 12.5" value={voltage}
-            onChange={(e) => setVoltage(e.target.value)} autoFocus />
-        </div>
-        <div className="form-group">
-          <label>Resistance (Ω)</label>
-          <input type="number" step="0.1" placeholder="e.g. 120" value={resistance}
-            onChange={(e) => setResistance(e.target.value)} />
-        </div>
-      </div>
-      <div className="form-group">
-        <label>Taken by</label>
-        <input type="text" placeholder="Name or initials" value={takenBy}
-          onChange={(e) => setTakenBy(e.target.value)} />
-      </div>
-      {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{error}</p>}
-      <div className="row">
-        <button className="btn-primary" style={{ flex: 1 }} onClick={handleConfirm} disabled={submitting}>
-          {submitting ? 'Saving…' : 'Confirm — take battery'}
-        </button>
-        <button className="btn-ghost" onClick={onClose}>Cancel</button>
-      </div>
-    </Modal>
-  )
-}
 
 // ── Place on Heater modal ─────────────────────────────────────────────────────
 
@@ -348,185 +250,30 @@ function HeaterSlotCard({ suggestion, activeSession, heaterWarmMinutes, nextMatc
   )
 }
 
-// ── Move to Heater modal ──────────────────────────────────────────────────────
-
-interface MoveToHeaterModalProps {
-  session: ChargerSession
-  targetSlot: number
-  nextMatchNumber: number | null
-  onClose: () => void
-}
-
-function MoveToHeaterModal({ session, targetSlot, nextMatchNumber, onClose }: MoveToHeaterModalProps) {
-  const [voltage, setVoltage] = useState('')
-  const [resistance, setResistance] = useState('')
-  const [movedBy, setMovedBy] = useState('')
-  const [acknowledged, setAcknowledged] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState('')
-
-  const chargeMinutes = Math.floor((Date.now() - session.placedAt) / 60_000)
-  const underCharged = chargeMinutes < 60
-
-  async function handleConfirm() {
-    if (!movedBy.trim()) { setError('Please enter who is moving the battery.'); return }
-    setSubmitting(true)
-    try {
-      await removeFromCharger(session, voltage ? parseFloat(voltage) : null, false)
-      const result = await placeOnHeater(
-        session.batteryId, targetSlot, nextMatchNumber, movedBy.trim(),
-      )
-      if (!result.ok) { setError(result.error ?? 'Could not place on heater.'); setSubmitting(false); return }
-      onClose()
-    } catch {
-      setError('Something went wrong. Please try again.')
-      setSubmitting(false)
-    }
-  }
-
-  return (
-    <Modal title={`Move ${session.batteryId} → Heater ${targetSlot}`} onClose={onClose}>
-      <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
-        Remove from charger and place on heater {targetSlot}
-        {nextMatchNumber ? ` for Match ${nextMatchNumber}` : ''}.
-      </p>
-
-      {underCharged && (
-        <div style={{ background: 'rgba(224,82,82,0.12)', border: '1px solid var(--color-danger)', borderRadius: 'var(--radius-sm)', padding: '0.6rem 0.75rem', marginBottom: '0.9rem' }}>
-          <div style={{ fontSize: '0.85rem', color: 'var(--color-danger)', fontWeight: 600, marginBottom: '0.35rem' }}>
-            ⚠️ Only charged for {chargeMinutes} min — may not be fully charged
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <input type="checkbox" id="ack" checked={acknowledged}
-              onChange={(e) => setAcknowledged(e.target.checked)} style={{ width: 'auto' }} />
-            <label htmlFor="ack" style={{ margin: 0, textTransform: 'none', fontSize: '0.85rem', color: 'var(--color-danger)' }}>
-              I understand, move it anyway
-            </label>
-          </div>
-        </div>
-      )}
-
-      <div className="form-row">
-        <div className="form-group">
-          <label>Voltage V0</label>
-          <input type="number" step="0.01" placeholder="e.g. 12.6" value={voltage}
-            onChange={(e) => setVoltage(e.target.value)} autoFocus={!underCharged} />
-        </div>
-        <div className="form-group">
-          <label>Resistance (Ω)</label>
-          <input type="number" step="0.1" placeholder="e.g. 120" value={resistance}
-            onChange={(e) => setResistance(e.target.value)} />
-        </div>
-      </div>
-      <div className="form-group">
-        <label>Moved by</label>
-        <input type="text" placeholder="Name or initials" value={movedBy}
-          onChange={(e) => setMovedBy(e.target.value)} />
-      </div>
-      {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{error}</p>}
-      <div className="row">
-        <button className="btn-primary" style={{ flex: 1 }} onClick={handleConfirm}
-          disabled={submitting || (underCharged && !acknowledged)}>
-          {submitting ? 'Moving…' : 'Confirm — move to heater'}
-        </button>
-        <button className="btn-ghost" onClick={onClose}>Cancel</button>
-      </div>
-    </Modal>
-  )
-}
-
-// ── Remove from Heater modal (non-match) ──────────────────────────────────────
-
-interface RemoveFromHeaterModalProps {
-  session: HeaterSession
-  onClose: () => void
-}
-
-function RemoveFromHeaterModal({ session, onClose }: RemoveFromHeaterModalProps) {
-  const [voltage, setVoltage] = useState('')
-  const [removedBy, setRemovedBy] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState('')
-  const [done, setDone] = useState(false)
-
-  async function handleConfirm() {
-    if (!removedBy.trim()) { setError('Please enter who is removing the battery.'); return }
-    setSubmitting(true)
-    await removeFromHeater(session, removedBy.trim(), voltage ? parseFloat(voltage) : null)
-    setDone(true)
-    setSubmitting(false)
-  }
-
-  if (done) {
-    return (
-      <Modal title="Battery Removed" onClose={onClose}>
-        <div style={{ textAlign: 'center', padding: '0.5rem 0 1rem' }}>
-          <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🌡️</div>
-          <div style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '0.4rem' }}>
-            {session.batteryId} removed from heater
-          </div>
-          <div style={{ background: 'rgba(224,82,82,0.12)', border: '1px solid var(--color-danger)', borderRadius: 'var(--radius-sm)', padding: '0.75rem', fontSize: '0.9rem', color: 'var(--color-danger)', marginBottom: '1.25rem' }}>
-            Allow <strong>30 minutes to cool</strong> before placing on charger
-          </div>
-          <button className="btn-primary" style={{ width: '100%' }} onClick={onClose}>Got it</button>
-        </div>
-      </Modal>
-    )
-  }
-
-  return (
-    <Modal title={`Remove ${session.batteryId} from Heater ${session.slotNumber}`} onClose={onClose}>
-      <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
-        End-of-day removal or early pull. Battery will need 30 min to cool before charging.
-      </p>
-      <div className="form-group">
-        <label>Voltage (optional)</label>
-        <input type="number" step="0.01" placeholder="e.g. 12.6" value={voltage}
-          onChange={(e) => setVoltage(e.target.value)} autoFocus />
-      </div>
-      <div className="form-group">
-        <label>Removed by</label>
-        <input type="text" placeholder="Name or initials" value={removedBy}
-          onChange={(e) => setRemovedBy(e.target.value)} />
-      </div>
-      {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{error}</p>}
-      <div className="row">
-        <button className="btn-primary" style={{ flex: 1 }} onClick={handleConfirm}
-          disabled={!removedBy.trim() || submitting}>
-          {submitting ? 'Saving…' : 'Remove from heater'}
-        </button>
-        <button className="btn-ghost" onClick={onClose}>Cancel</button>
-      </div>
-    </Modal>
-  )
-}
 
 // ── Charger slot modal ────────────────────────────────────────────────────────
 
 interface ChargerSlotModalProps {
   slotNumber: number
   existingSession: ChargerSession | null
-  lastUsageEvent: BatteryUsageEvent | undefined
-  availableHeaterSlot: number | null
-  nextMatchNumber: number | null
   defaultBatteryId?: string
-  onMoveToHeater: () => void
   onClose: () => void
 }
 
-function ChargerSlotModal({ slotNumber, existingSession, lastUsageEvent, availableHeaterSlot, nextMatchNumber, defaultBatteryId, onMoveToHeater, onClose }: ChargerSlotModalProps) {
+function ChargerSlotModal({ slotNumber, existingSession, defaultBatteryId, onClose }: ChargerSlotModalProps) {
+  if (existingSession) {
+    return <BatteryManageModal batteryId={existingSession.batteryId} onClose={onClose} />
+  }
+  return <EmptySlotModal slotNumber={slotNumber} defaultBatteryId={defaultBatteryId} onClose={onClose} />
+}
+
+function EmptySlotModal({ slotNumber, defaultBatteryId, onClose }: { slotNumber: number; defaultBatteryId?: string; onClose: () => void }) {
   const batteries = useBatteries()
-  const [batteryId, setBatteryId] = useState(existingSession?.batteryId ?? defaultBatteryId ?? '')
+  const [batteryId, setBatteryId] = useState(defaultBatteryId ?? '')
   const [voltage, setVoltage] = useState('')
   const [resistance, setResistance] = useState('')
-  const [voltageOut, setVoltageOut] = useState('')
-  const [isFullCycle, setIsFullCycle] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const [takenBy, setTakenBy] = useState('')
-  const [practiceVoltage, setPracticeVoltage] = useState('')
-  const [practiceResistance, setPracticeResistance] = useState('')
-  const [showPractice, setShowPractice] = useState(false)
 
   const batteryUsageEvents = useLiveQuery(
     () => batteryId
@@ -545,161 +292,39 @@ function ChargerSlotModal({ slotNumber, existingSession, lastUsageEvent, availab
     onClose()
   }
 
-  async function handleRemove() {
-    if (!existingSession) return
-    setSubmitting(true)
-    await removeFromCharger(existingSession, voltageOut ? parseFloat(voltageOut) : null, isFullCycle)
-    setSubmitting(false)
-    onClose()
-  }
-
-  async function handleTakeForPractice() {
-    if (!existingSession || !takenBy.trim()) { setError('Enter who is taking the battery.'); return }
-    setSubmitting(true); setError('')
-    try {
-      await removeFromCharger(existingSession, practiceVoltage ? parseFloat(practiceVoltage) : null, false)
-      await recordUsageEvent({
-        batteryId: existingSession.batteryId, eventType: 'practice', matchNumber: null,
-        takenAt: Date.now(), returnedAt: null, takenBy: takenBy.trim(),
-        voltageAtTake: practiceVoltage ? parseFloat(practiceVoltage) : null,
-        resistanceAtTake: practiceResistance ? parseFloat(practiceResistance) : null,
-        fromLocation: 'charger', fromSlot: slotNumber, notes: '',
-      })
-      onClose()
-    } catch {
-      setError('Something went wrong.')
-      setSubmitting(false)
-    }
-  }
-
-  const elapsed = existingSession ? Date.now() - existingSession.placedAt : 0
-
   return (
     <Modal title={`Slot ${slotNumber} — ${chargerLabel(slotNumber)}`} onClose={onClose}>
-      {existingSession ? (
-        <>
-          <div style={{ marginBottom: '0.75rem' }}>
-            <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{existingSession.batteryId}</div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
-              On charger since {formatDayTime(existingSession.placedAt)} · {formatDuration(elapsed)}
-            </div>
-            {existingSession.voltageAtPlacement !== null && (
-              <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
-                V0: {existingSession.voltageAtPlacement}V
-                {existingSession.resistanceAtPlacement !== null && ` · ${existingSession.resistanceAtPlacement}Ω`}
-              </div>
-            )}
-            {lastUsageEvent && (
-              <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: '0.2rem' }}>
-                {lastUsageLabel(lastUsageEvent)}
-              </div>
-            )}
-          </div>
-          {!showPractice ? (
-            <>
-              <div className="form-group">
-                <label>Voltage at removal (V)</label>
-                <input type="number" step="0.01" placeholder="e.g. 12.6" value={voltageOut}
-                  onChange={(e) => setVoltageOut(e.target.value)} />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                <input type="checkbox" id="fullCycle" checked={isFullCycle}
-                  onChange={(e) => setIsFullCycle(e.target.checked)} style={{ width: 'auto' }} />
-                <label htmlFor="fullCycle" style={{ margin: 0, textTransform: 'none', fontSize: '0.9rem' }}>
-                  Count as full charge cycle
-                </label>
-              </div>
-              {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{error}</p>}
-              <div className="row" style={{ marginBottom: '0.5rem' }}>
-                <button className="btn-primary" style={{ flex: 1 }} onClick={handleRemove} disabled={submitting}>
-                  Remove from charger
-                </button>
-                <button className="btn-ghost" onClick={onClose}>Cancel</button>
-              </div>
-              <button className="btn-ghost" style={{ width: '100%', fontSize: '0.85rem' }} onClick={() => setShowPractice(true)}>
-                Take for practice field →
-              </button>
-              <button
-                className="btn-ghost"
-                style={{
-                  width: '100%', fontSize: '0.85rem', marginTop: '0.35rem',
-                  color: availableHeaterSlot !== null ? 'var(--color-primary)' : undefined,
-                  borderColor: availableHeaterSlot !== null ? 'var(--color-primary)' : undefined,
-                  opacity: availableHeaterSlot !== null ? 1 : 0.45,
-                }}
-                disabled={availableHeaterSlot === null}
-                onClick={availableHeaterSlot !== null ? onMoveToHeater : undefined}
-              >
-                {availableHeaterSlot !== null
-                  ? `Move to Heater ${availableHeaterSlot}${nextMatchNumber ? ` (Match ${nextMatchNumber})` : ''} →`
-                  : 'Move to Heater (both slots full)'}
-              </button>
-            </>
-          ) : (
-            <>
-              <h3 style={{ marginBottom: '0.75rem' }}>Take for Practice</h3>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Voltage V0</label>
-                  <input type="number" step="0.01" placeholder="e.g. 12.5" value={practiceVoltage}
-                    onChange={(e) => setPracticeVoltage(e.target.value)} autoFocus />
-                </div>
-                <div className="form-group">
-                  <label>Resistance (Ω)</label>
-                  <input type="number" step="0.1" placeholder="e.g. 120" value={practiceResistance}
-                    onChange={(e) => setPracticeResistance(e.target.value)} />
-                </div>
-              </div>
-              <div className="form-group">
-                <label>Taken by</label>
-                <input type="text" placeholder="Name or initials" value={takenBy}
-                  onChange={(e) => setTakenBy(e.target.value)} />
-              </div>
-              {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{error}</p>}
-              <div className="row">
-                <button className="btn-primary" style={{ flex: 1 }} onClick={handleTakeForPractice} disabled={submitting}>
-                  {submitting ? 'Saving…' : 'Confirm — take for practice'}
-                </button>
-                <button className="btn-ghost" onClick={() => setShowPractice(false)}>Back</button>
-              </div>
-            </>
-          )}
-        </>
-      ) : (
-        <>
-          <div className="form-group">
-            <label>Battery</label>
-            <select value={batteryId} onChange={(e) => setBatteryId(e.target.value)}>
-              <option value="">Select battery…</option>
-              {batteries.map((b) => <option key={b.id} value={b.id}>{b.id}</option>)}
-            </select>
-          </div>
-          <div className="form-row">
-            <div className="form-group">
-              <label>Voltage V0</label>
-              <input type="number" step="0.01" placeholder="e.g. 12.1" value={voltage}
-                onChange={(e) => setVoltage(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label>Resistance (Ω)</label>
-              <input type="number" step="0.1" placeholder="e.g. 120" value={resistance}
-                onChange={(e) => setResistance(e.target.value)} />
-            </div>
-          </div>
-          {openUsageEvent && (
-            <div style={{ background: 'rgba(91,155,213,0.12)', border: '1px solid var(--color-info)', borderRadius: 'var(--radius-sm)', padding: '0.5rem 0.75rem', fontSize: '0.82rem', color: 'var(--color-info)', marginBottom: '0.75rem' }}>
-              ℹ️ {batteryId} is currently {openUsageEvent.eventType === 'match' ? `in match ${openUsageEvent.matchNumber}` : 'at practice field'} — placing here will mark it as returned.
-            </div>
-          )}
-          {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{error}</p>}
-          <div className="row">
-            <button className="btn-primary" style={{ flex: 1 }} onClick={handlePlace} disabled={!batteryId || submitting}>
-              {openUsageEvent ? 'Return & place on charger' : 'Place on charger'}
-            </button>
-            <button className="btn-ghost" onClick={onClose}>Cancel</button>
-          </div>
-        </>
+      <div className="form-group">
+        <label>Battery</label>
+        <select value={batteryId} onChange={(e) => setBatteryId(e.target.value)}>
+          <option value="">Select battery…</option>
+          {batteries.map((b) => <option key={b.id} value={b.id}>{b.id}</option>)}
+        </select>
+      </div>
+      <div className="form-row">
+        <div className="form-group">
+          <label>Voltage V0</label>
+          <input type="number" step="0.01" placeholder="e.g. 12.1" value={voltage}
+            onChange={(e) => setVoltage(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label>Resistance (Ω)</label>
+          <input type="number" step="0.1" placeholder="e.g. 120" value={resistance}
+            onChange={(e) => setResistance(e.target.value)} />
+        </div>
+      </div>
+      {openUsageEvent && (
+        <div style={{ background: 'rgba(91,155,213,0.12)', border: '1px solid var(--color-info)', borderRadius: 'var(--radius-sm)', padding: '0.5rem 0.75rem', fontSize: '0.82rem', color: 'var(--color-info)', marginBottom: '0.75rem' }}>
+          ℹ️ {batteryId} is currently {openUsageEvent.eventType === 'match' ? `in match ${openUsageEvent.matchNumber}` : 'at practice field'} — placing here will mark it as returned.
+        </div>
       )}
+      {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{error}</p>}
+      <div className="row">
+        <button className="btn-primary" style={{ flex: 1 }} onClick={handlePlace} disabled={!batteryId || submitting}>
+          {openUsageEvent ? 'Return & place on charger' : 'Place on charger'}
+        </button>
+        <button className="btn-ghost" onClick={onClose}>Cancel</button>
+      </div>
     </Modal>
   )
 }
@@ -995,14 +620,7 @@ export default function Dashboard() {
         <ChargerSlotModal
           slotNumber={selectedSlot}
           existingSession={sessionBySlot[selectedSlot] ?? null}
-          lastUsageEvent={sessionBySlot[selectedSlot] ? lastEventByBattery.get(sessionBySlot[selectedSlot].batteryId) : undefined}
-          availableHeaterSlot={availableHeaterSlot}
-          nextMatchNumber={nextMatch?.matchNumber ?? null}
           defaultBatteryId={sessionBySlot[selectedSlot] ? undefined : suggestedBatteryBySlot.get(selectedSlot)}
-          onMoveToHeater={() => {
-            const session = sessionBySlot[selectedSlot]
-            if (session) { setMoveToHeaterSession(session); setSelectedSlot(null) }
-          }}
           onClose={() => setSelectedSlot(null)}
         />
       )}
