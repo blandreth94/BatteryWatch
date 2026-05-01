@@ -7,6 +7,7 @@ import { useSettings } from '../store/useSettings'
 import { useActiveUsageEvents, recordUsageEvent, returnBattery } from '../store/useUsageEvents'
 import { db } from '../db/schema'
 import Modal from '../components/Modal'
+import { BatteryManageModal } from '../components/BatteryManageModal'
 import type { Battery, ChargerSession, HeaterSession, BatteryUsageEvent, AppSettings } from '../types'
 import { formatTime, formatDate, formatRelative } from '../utils/time'
 function formatDuration(ms: number): string {
@@ -59,10 +60,11 @@ interface DetailModalProps {
   activeHeaterSessions: HeaterSession[]
   activeUsageEvents: BatteryUsageEvent[]
   settings: AppSettings
+  onManage: () => void
   onClose: () => void
 }
 
-function DetailModal({ battery, activeChargerSessions, activeHeaterSessions, activeUsageEvents, settings, onClose }: DetailModalProps) {
+function DetailModal({ battery, activeChargerSessions, activeHeaterSessions, activeUsageEvents, settings, onManage, onClose }: DetailModalProps) {
   const [resistance, setResistance] = useState(battery.internalResistance?.toString() ?? '')
   const [notes, setNotes] = useState(battery.notes)
   const [saving, setSaving] = useState(false)
@@ -405,18 +407,14 @@ function DetailModal({ battery, activeChargerSessions, activeHeaterSessions, act
               <button className="btn-ghost" style={{ width: '100%', fontSize: '0.85rem' }} onClick={() => setScreen('take-practice')}>Take for Practice →</button>
             </>
           )}
-          {chargerSession && (
-            <>
-              <button className="btn-ghost" style={{ width: '100%', fontSize: '0.85rem' }} onClick={() => setScreen('place-heater')}>Move to Heater →</button>
-              <button className="btn-ghost" style={{ width: '100%', fontSize: '0.85rem' }} onClick={() => setScreen('take-practice')}>Take for Practice →</button>
-              <button className="btn-ghost" style={{ width: '100%', fontSize: '0.85rem' }} onClick={() => setScreen('remove-charger')}>Remove from Charger →</button>
-            </>
-          )}
-          {heaterSession && (
-            <>
-              <button className="btn-ghost" style={{ width: '100%', fontSize: '0.85rem' }} onClick={() => setScreen('take-practice')}>Take for Practice →</button>
-              <button className="btn-ghost" style={{ width: '100%', fontSize: '0.85rem' }} onClick={() => setScreen('remove-heater')}>Remove from Heater →</button>
-            </>
+          {(chargerSession || heaterSession) && (
+            <button
+              className="btn-ghost"
+              style={{ width: '100%', fontSize: '0.85rem', color: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
+              onClick={onManage}
+            >
+              Manage Battery →
+            </button>
           )}
           {usageEvent && (
             <button
@@ -566,6 +564,7 @@ export default function Batteries() {
   const activeUsageEvents = useActiveUsageEvents()
   const settings = useSettings()
   const [selected, setSelected] = useState<Battery | null>(null)
+  const [manageTarget, setManageTarget] = useState<Battery | null>(null)
   const [showAdd, setShowAdd] = useState(false)
 
   return (
@@ -605,7 +604,14 @@ export default function Batteries() {
           activeHeaterSessions={activeHeaterSessions}
           activeUsageEvents={activeUsageEvents}
           settings={settings}
+          onManage={() => { setManageTarget(selected); setSelected(null) }}
           onClose={() => setSelected(null)}
+        />
+      )}
+      {manageTarget && (
+        <BatteryManageModal
+          batteryId={manageTarget.id}
+          onClose={() => setManageTarget(null)}
         />
       )}
       {showAdd && (
