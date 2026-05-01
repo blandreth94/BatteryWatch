@@ -65,14 +65,17 @@ export async function importFromTBA(eventKey: string, apiKey: string, teamNumber
     .filter((m) => m.comp_level === 'qm' || m.comp_level === 'sf' || m.comp_level === 'f')
     .sort((a, b) => a.time - b.time)
 
-  // Existing upcoming matches keyed by matchNumber — used for deduplication so
-  // re-importing preserves battery assignments and avoids creating duplicate rows.
-  const existingUpcoming = await db.matchRecords.where('status').equals('upcoming').toArray()
-  const existingByMatchNum = new Map(existingUpcoming.map((r) => [r.matchNumber, r]))
+  // All existing records keyed by matchNumber — covers upcoming, active, and
+  // complete so we never create duplicates regardless of match status.
+  const allExisting = await db.matchRecords.toArray()
+  const existingByMatchNum = new Map(allExisting.map((r) => [r.matchNumber, r]))
   const tbaMatchNumbers = new Set(ourMatches.map((m) => m.match_number))
 
-  // Upcoming records no longer present in TBA data should be removed.
-  const toDelete = existingUpcoming.filter((r) => !tbaMatchNumbers.has(r.matchNumber))
+  // Only remove upcoming records that are no longer in TBA data.
+  // Active / complete records are never touched.
+  const toDelete = allExisting.filter(
+    (r) => r.status === 'upcoming' && !tbaMatchNumbers.has(r.matchNumber),
+  )
 
   await db.transaction('rw', db.matchRecords, async () => {
     // Remove stale upcoming records
@@ -83,10 +86,11 @@ export async function importFromTBA(eventKey: string, apiKey: string, teamNumber
       const allianceColor: 'red' | 'blue' = m.alliances.red.team_keys.includes(team) ? 'red' : 'blue'
       const scheduledTime = m.predicted_time ? m.predicted_time * 1000 : m.time * 1000
       const existing = existingByMatchNum.get(m.match_number)
-      if (existing) {
+      if (existing?.status === 'upcoming') {
         // Update timing + alliance color; preserve batteryId and other user data
         await db.matchRecords.update(existing.id!, { scheduledTime, allianceColor })
-      } else {
+      } else if (!existing) {
+        // New match — create it
         await db.matchRecords.add({
           syncId: generateId(),
           matchNumber: m.match_number,
@@ -95,6 +99,7 @@ export async function importFromTBA(eventKey: string, apiKey: string, teamNumber
           allianceColor,
         })
       }
+      // active/complete matches are left untouched
     }
   })
 
