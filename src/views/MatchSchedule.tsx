@@ -124,7 +124,7 @@ export default function MatchSchedule() {
     setImportError('')
     setImportCount(null)
     try {
-      const count = await importFromTBA(settings.tbaEventKey, settings.tbaApiKey)
+      const count = await importFromTBA(settings.tbaEventKey, settings.tbaApiKey, settings.teamNumber)
       setImportCount(count)
     } catch (e) {
       setImportError(e instanceof Error ? e.message : 'Import failed')

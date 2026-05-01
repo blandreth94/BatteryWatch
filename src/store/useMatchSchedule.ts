@@ -65,27 +65,43 @@ export async function importFromTBA(eventKey: string, apiKey: string, teamNumber
     .filter((m) => m.comp_level === 'qm' || m.comp_level === 'sf' || m.comp_level === 'f')
     .sort((a, b) => a.time - b.time)
 
-  // Gather syncIds of records about to be deleted so we can push deletes
-  const toDelete = await db.matchRecords.where('status').equals('upcoming').toArray()
-  const deletedSyncIds = toDelete.map((r) => r.syncId).filter(Boolean) as string[]
+  // Existing upcoming matches keyed by matchNumber — used for deduplication so
+  // re-importing preserves battery assignments and avoids creating duplicate rows.
+  const existingUpcoming = await db.matchRecords.where('status').equals('upcoming').toArray()
+  const existingByMatchNum = new Map(existingUpcoming.map((r) => [r.matchNumber, r]))
+  const tbaMatchNumbers = new Set(ourMatches.map((m) => m.match_number))
+
+  // Upcoming records no longer present in TBA data should be removed.
+  const toDelete = existingUpcoming.filter((r) => !tbaMatchNumbers.has(r.matchNumber))
 
   await db.transaction('rw', db.matchRecords, async () => {
-    await db.matchRecords.where('status').equals('upcoming').delete()
+    // Remove stale upcoming records
+    for (const r of toDelete) {
+      if (r.id !== undefined) await db.matchRecords.delete(r.id)
+    }
     for (const m of ourMatches) {
-      await db.matchRecords.add({
-        syncId: generateId(),
-        matchNumber: m.match_number,
-        scheduledTime: m.predicted_time ? m.predicted_time * 1000 : m.time * 1000,
-        batteryId: null, completedAt: null, status: 'upcoming',
-        allianceColor: m.alliances.red.team_keys.includes(team) ? 'red' : 'blue',
-      })
+      const allianceColor: 'red' | 'blue' = m.alliances.red.team_keys.includes(team) ? 'red' : 'blue'
+      const scheduledTime = m.predicted_time ? m.predicted_time * 1000 : m.time * 1000
+      const existing = existingByMatchNum.get(m.match_number)
+      if (existing) {
+        // Update timing + alliance color; preserve batteryId and other user data
+        await db.matchRecords.update(existing.id!, { scheduledTime, allianceColor })
+      } else {
+        await db.matchRecords.add({
+          syncId: generateId(),
+          matchNumber: m.match_number,
+          scheduledTime,
+          batteryId: null, completedAt: null, status: 'upcoming',
+          allianceColor,
+        })
+      }
     }
   })
 
-  // Enqueue all changes
-  for (const syncId of deletedSyncIds) await enqueueSync('matchRecords', syncId, 'delete')
-  const newRecords = await db.matchRecords.where('status').equals('upcoming').toArray()
-  for (const r of newRecords) if (r.syncId) await enqueueSync('matchRecords', r.syncId)
+  // Enqueue sync for deleted and upserted records
+  for (const r of toDelete) if (r.syncId) await enqueueSync('matchRecords', r.syncId, 'delete')
+  const allUpcoming = await db.matchRecords.where('status').equals('upcoming').toArray()
+  for (const r of allUpcoming) if (r.syncId) await enqueueSync('matchRecords', r.syncId)
   flushSync()
 
   return ourMatches.length
