@@ -144,6 +144,13 @@ export function computeHeaterSuggestions(
   })
 }
 
+function formatMinutes(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return m > 0 ? `${h}h ${m}m` : `${h}h`
+}
+
 export function rankBatteriesForNextMatch(
   statuses: BatteryStatus[],
   activeHeaterSessions: HeaterSession[],
@@ -168,22 +175,25 @@ export function rankBatteriesForNextMatch(
       const lastUsed = lastUsedMap.get(s.battery.id)
       const restMinutes = lastUsed ? Math.floor((now - lastUsed) / 60_000) : null
 
-      // Tier 1: warm heater (0), Tier 2: unready heater (500),
-      // Tier 3: charger — prefer longest charging (1000 − chargeMinutes), Tier 4: pit (2000)
+      // Tiers use large gaps (100 000) so that restMinutes / cycleCount adjustments
+      // act as tiebreakers within a tier but can never promote a lower-tier battery
+      // above a higher-tier one — even for batteries with very long rest or charge times.
+      // Tier 1: warm heater (0), Tier 2: unready heater (100 000),
+      // Tier 3: charger — prefer longest charging (200 000 − chargeMinutes), Tier 4: pit (300 000)
       let score: number
       if (isWarm) score = 0
-      else if (s.location === 'heater') score = 500
-      else if (chargeMinutes !== null) score = 1000 - chargeMinutes
-      else score = 2000
+      else if (s.location === 'heater') score = 100_000
+      else if (chargeMinutes !== null) score = 200_000 - chargeMinutes
+      else score = 300_000
 
       if (restMinutes !== null) score -= restMinutes
       score += s.battery.cycleCount
 
       const reasons: string[] = []
-      if (isWarm && minutesOnHeater !== null) reasons.push(`${minutesOnHeater}min on heater`)
-      else if (minutesOnHeater !== null) reasons.push(`${minutesOnHeater}min warming`)
-      else if (chargeMinutes !== null) reasons.push(`${chargeMinutes}min charging`)
-      if (restMinutes !== null && restMinutes > 0) reasons.push(`${restMinutes}min rest`)
+      if (isWarm && minutesOnHeater !== null) reasons.push(`${formatMinutes(minutesOnHeater)} on heater`)
+      else if (minutesOnHeater !== null) reasons.push(`${formatMinutes(minutesOnHeater)} warming`)
+      else if (chargeMinutes !== null) reasons.push(`${formatMinutes(chargeMinutes)} charging`)
+      if (restMinutes !== null && restMinutes > 0) reasons.push(`${formatMinutes(restMinutes)} rest`)
       else if (!lastUsed) reasons.push('never used')
       reasons.push(`${s.battery.cycleCount} cycles`)
 
