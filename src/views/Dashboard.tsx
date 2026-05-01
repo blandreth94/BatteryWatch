@@ -738,6 +738,16 @@ export default function Dashboard() {
   const topSuggestion = matchSuggestions[0]
   const alternates = matchSuggestions.slice(1, 3)
 
+  const topLocation = topSuggestion
+    ? (() => {
+        const hs = activeHeaterSessions.find((s) => s.batteryId === topSuggestion.batteryId)
+        if (hs) return `Heater Slot ${hs.slotNumber}`
+        const cs = activeSessions.find((s) => s.batteryId === topSuggestion.batteryId)
+        if (cs) return `Charger Slot ${cs.slotNumber}`
+        return 'In Pit'
+      })()
+    : null
+
   const sessionBySlot = Object.fromEntries(activeSessions.map((s) => [s.slotNumber, s]))
 
   const lastEventByBattery = new Map<string, BatteryUsageEvent>()
@@ -778,14 +788,32 @@ export default function Dashboard() {
       {/* Next Up — always shown */}
       <div className="card">
         <div className="section-header">
-          <h2>{nextMatch ? `Next Up: Match ${nextMatch.matchNumber}` : 'Next Up'}</h2>
+          <h2>
+            {nextMatch
+              ? <>
+                  Next Up: Match {nextMatch.matchNumber}
+                  {nextMatch.allianceColor && (
+                    <span style={{
+                      marginLeft: '0.5rem',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      color: nextMatch.allianceColor === 'red' ? '#e53935' : '#1e88e5',
+                      verticalAlign: 'middle',
+                    }}>
+                      — {nextMatch.allianceColor === 'red' ? 'Red' : 'Blue'} Alliance
+                    </span>
+                  )}
+                </>
+              : 'Next Up'
+            }
+          </h2>
         </div>
         {topSuggestion ? (
           <>
             <div className="suggestion-card" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
               <div className="suggestion-card__battery" style={{ flexShrink: 0 }}>{topSuggestion.batteryId}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="suggestion-card__label" style={{ marginBottom: '0.15rem' }}>Recommended</div>
+                <div className="suggestion-card__label" style={{ marginBottom: '0.15rem' }}>{topLocation}</div>
                 <div className="suggestion-card__reason">{topSuggestion.reason}</div>
                 {alternates.length > 0 && (
                   <div className="suggestion-card__alts" style={{ marginTop: '0.2rem' }}>
@@ -876,7 +904,7 @@ export default function Dashboard() {
 
                 if (session) {
                   return (
-                    <div key={slot} className="bay-card bay-card--charging" onClick={() => setSelectedSlot(slot)}>
+                    <div key={slot} className={`bay-card ${elapsed >= settings.chargeReadyMinutes * 60 * 1000 ? 'bay-card--ready' : 'bay-card--charging'}`} onClick={() => setSelectedSlot(slot)}>
                       <div className="bay-card__header">
                         <span className="bay-card__slot">{slot}</span>
                         <span className="bay-card__battery-id">{session.batteryId}</span>

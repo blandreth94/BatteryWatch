@@ -87,7 +87,8 @@ create table if not exists match_records (
   scheduled_time bigint not null,
   battery_id     text,
   completed_at   bigint,
-  status         text not null   -- 'upcoming' | 'active' | 'complete'
+  status         text not null,  -- 'upcoming' | 'active' | 'complete'
+  alliance_color text check (alliance_color in ('red', 'blue'))
 );
 
 create index if not exists match_records_team_id on match_records (team_id);
@@ -104,6 +105,7 @@ create table if not exists app_settings (
   heater_warm_minutes    integer not null default 30,
   walk_and_queue_minutes integer not null default 20,
   heater_slot_count      integer not null default 2,
+  charge_ready_minutes   integer not null default 90,
   tba_api_key            text not null default '',
   tba_event_key          text not null default ''
 );

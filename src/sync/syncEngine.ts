@@ -230,7 +230,7 @@ async function _buildRow(table: SyncableTable, syncId: string): Promise<Record<s
         sync_id: r.syncId, team_id: tid,
         match_number: r.matchNumber, scheduled_time: r.scheduledTime,
         battery_id: r.batteryId, completed_at: r.completedAt,
-        status: r.status,
+        status: r.status, alliance_color: r.allianceColor ?? null,
       }
     }
     case 'settings': {
@@ -243,6 +243,7 @@ async function _buildRow(table: SyncableTable, syncId: string): Promise<Record<s
         heater_warm_minutes: r.heaterWarmMinutes,
         walk_and_queue_minutes: r.walkAndQueueMinutes,
         heater_slot_count: r.heaterSlotCount,
+        charge_ready_minutes: r.chargeReadyMinutes,
         tba_api_key: r.tbaApiKey, tba_event_key: r.tbaEventKey,
       }
     }
@@ -301,6 +302,7 @@ function _rowToMatchRecord(r: any): MatchRecord {
     syncId: r.sync_id, matchNumber: r.match_number,
     scheduledTime: r.scheduled_time, batteryId: r.battery_id,
     completedAt: r.completed_at, status: r.status,
+    allianceColor: r.alliance_color ?? null,
   }
 }
 
@@ -340,6 +342,7 @@ async function _applyRealtimeEvent(
         seasonYear: newRow.season_year, heaterWarmMinutes: newRow.heater_warm_minutes,
         walkAndQueueMinutes: newRow.walk_and_queue_minutes,
         heaterSlotCount: newRow.heater_slot_count ?? DEFAULT_SETTINGS.heaterSlotCount,
+        chargeReadyMinutes: newRow.charge_ready_minutes ?? DEFAULT_SETTINGS.chargeReadyMinutes,
         tbaApiKey: newRow.tba_api_key, tbaEventKey: newRow.tba_event_key,
       } as AppSettings)
       break
@@ -388,6 +391,7 @@ export async function pullFromSupabase(): Promise<void> {
           seasonYear: r.season_year, heaterWarmMinutes: r.heater_warm_minutes,
           walkAndQueueMinutes: r.walk_and_queue_minutes,
           heaterSlotCount: r.heater_slot_count ?? DEFAULT_SETTINGS.heaterSlotCount,
+          chargeReadyMinutes: r.charge_ready_minutes ?? DEFAULT_SETTINGS.chargeReadyMinutes,
           tbaApiKey: r.tba_api_key, tbaEventKey: r.tba_event_key,
         } as AppSettings)
       }
